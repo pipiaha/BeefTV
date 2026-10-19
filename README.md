@@ -77,6 +77,8 @@ AI Native 自由画布
 
 本 fork 的原生 ComfyUI 和外部 Agent 接入改动位于 `codex/comfyui-native-media` 分支，使用该分支构建。页面上的上游桌面下载不包含本 fork 新增功能。
 
+项目改造、验证范围、贡献分支和其他机器参与方式见 [Fork 项目现状与跨机器交接](docs/fork-handoff.md)。
+
 下载桌面版及 Mac 首次打开说明见 [快速开始](QUICKSTART.md#下载与首次打开)。
 
 ```bash

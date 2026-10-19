@@ -1,0 +1,179 @@
+# Fork 项目现状与跨机器交接
+
+本文是新 Agent 接手本 fork 的入口。功能基线为 `710aa9c`；接手时通过 `git log`、当前工作区和 GitHub 查询确认后续变化。运行配置和真实业务状态以 MCP 返回值为准。
+
+## 接手先做什么
+
+1. **参与开发**：拉取下述 fork 分支，阅读根 [AGENTS.md](../AGENTS.md)、[协作约定](human-agent-workbench.md)，检查当前工作区和用户交付的任务范围。完成标准：确认分支、已有修改和负责文件。
+2. **操作现有项目**：按[外部 Agent 接入](agent-onboarding.md)取得独立客户端配置，连接后调用 `beeftv_get_started`。完成标准：能发现目标画布、启用工作流和当前权限。
+3. **从其他机器操作同一实例**：先完成本文“跨机器参与”中的连接验证。克隆源码并不会连接原工作区，也不会带来原项目、模型配置或客户端凭据。
+
+## 项目定位
+
+用户与 Agent 共同完成媒体业务。Agent 理解需求、准备资产、编排执行、评审返工并面向用户交付；用户参与选择、修改和验收。BeefTV 承载双方可见的项目、画布、材料、任务和结果，ComfyUI 执行媒体生成，FFmpeg 执行本地拼接与导出。
+
+本 fork 保持独立界面。当前实机验证使用本地网页前端和独立 Go 后端，不是 ComfyUI 内部工作流或插件。本轮没有安装或发布包含 fork 功能的桌面应用；仓库上游仍有自己的 Wails 桌面产品与发行版。
+
+外部 Agent 的日常入口已经收敛为 **MCP stdio**。CLI 启动同一个 MCP 服务并承担维护诊断；HTTP API 是底层业务接口。内置聊天模型不作为外部 Agent 工作的前提。
+
+## 源码与贡献状态
+
+| 对象 | 位置与含义 |
+| --- | --- |
+| 上游 | [glanderness/BeefTV](https://github.com/glanderness/BeefTV) |
+| 完整 fork | [pipiaha/BeefTV](https://github.com/pipiaha/BeefTV)，分支 `codex/comfyui-native-media` |
+| 上游贡献分支 | `codex/contrib-comfyui-extension`，与完整 fork 分支独立 |
+| 上游贡献 PR | [#198](https://github.com/glanderness/BeefTV/pull/198)：交接时为 OPEN / Draft，仅提供后端原生适配候选及测试，尚未完成上游扩展集成 |
+| 本轮 UI 贡献 | 已进入完整 fork，尚未另开上游 PR，也未自动进入 #198 |
+| 发布状态 | 完整 fork 已推送；不等于上游已合并或已发布安装包 |
+
+新机器获取完整代码：
+
+```sh
+git clone --branch codex/comfyui-native-media https://github.com/pipiaha/BeefTV.git
+cd BeefTV
+git status --short
+git log -6 --oneline
+```
+
+主要提交：
+
+| 提交 | 内容 |
+| --- | --- |
+| `bc113c9` | 用户原有缓存修复，按 revision 对账，避免旧浏览器缓存覆盖后端新画布 |
+| `1f4ce4d` | 原生 ComfyUI 图片、视频、音频接入，以及多格式媒体导出 |
+| `7826de6` | 人机协作工作台定位与职责约定 |
+| `2e9bd8c` | MCP 自描述接入、首次指南、doctor 和全新客户端验收 |
+| `015b538` | README 与工作台中的常驻 Agent 接入说明 |
+| `710aa9c` | 模型设置重排、直接接入入口、音乐／配音／音效用途分类 |
+
+后续贡献的讨论方向是：继续完善 #198 的扩展接入合同，设置界面另作依赖该接入能力的后续 PR。#198 当前不是可供用户直接使用的完整 ComfyUI 功能；它不注册内置渠道、HTTP 路由、MCP 工具或设置 UI。完整 fork 的内置接入方式不能直接等同于上游已接受的扩展方式。新 Agent 修改贡献分支前应重新读取 PR 描述与维护者反馈。
+
+## 已完成的改造
+
+| 模块 | 当前实现 |
+| --- | --- |
+| 原生生成 | `comfyui-image`、`comfyui-video`、`comfyui-audio` 接入既有持久任务与结果入库链路 |
+| 工作流 | ComfyUI API JSON、标量与媒体字段映射、明确输出节点／字段、目标 `object_info` 预检 |
+| 素材上传 | 先上传到 BeefTV 资源库；适配器将归属校验后的真实图片、视频、音频或 mask 字节上传到目标 ComfyUI，绑定相对文件名 |
+| 恢复 | 保存已受理的 `prompt_id`；重连或重启后查询原任务；提交结果不确定时明确报告，不盲目重投 |
+| 取消 | 优先精确取消；旧版本针对原排队 ID 删除并核实，不使用共享实例的全局中断 |
+| 结果回填 | 沿用任务、resource、asset、画布绑定与引用关系，不把下载文件当成脱离项目的唯一成果 |
+| 合成导出 | MP4 图像／视频拼接及音轨组合；WAV／MP3 音频处理；恰好两张静态图的 PNG／JPEG 联系表 |
+| MCP 接入 | 首次握手说明、`beeftv_get_started`、内置操作指南、独立客户端身份与只读自检 |
+| 模型设置 | 服务接入与默认模型分开；外层直接显示 API／ComfyUI 添加入口和用途筛选；连接、工作流、常用参数、输出、高级映射分层 |
+| 音频用途 | 输出媒体仍为 `audio`；`audioUses` 独立记录 `music`、`speech`、`sound`，可多选，未分类显示为其他音频 |
+
+音频用途不等于新执行协议。Music3 属于音乐，不据此声称配音、声音克隆或音效已经跑通。新音乐／音效配置不会默认套用配音的 `/audio/speech` 协议；未知用途保留待分类，而非按模型名猜测。
+
+保存工作流名称时保留已有模型标识；共享连接保留其他工作流和连接信息。原有缓存修复的两个文件在本次 fork 改造中保持未改：`web/src/services/local-workspace-repository.ts`、`web/src/stores/canvas/use-canvas-store.ts`。
+
+## 验证到了哪里
+
+以下是既有实机验证记录，不代表新机器已经复验：
+
+| 范围 | 证据与边界 |
+| --- | --- |
+| Qwen Image 2.1 | ComfyUI 0.37，参考图真实上传、生成、下载、入库及画布回填成功 |
+| H3 图生视频 | ComfyUI 0.33，两段不同种子成功；每段 384×256、24 fps、39 帧，约 1.625 秒，4 步链路测试规格 |
+| Music3 | 两段约 4 秒音乐生成成功；包含后端中断后继续同一远端 prompt 的恢复验证 |
+| 参考音频／视频 | 真实上传、loader 读取、保存和结果取回成功；此项传输验证与新媒体生成分别记录 |
+| 组合导出 | 15 秒 MP4 含真实 Qwen、H3 和 Music3；WAV／MP3、两图 PNG／JPEG 也通过完整媒体解码 |
+| 全新 MCP 客户端 | 仅使用普通客户端配置，完成指南发现、上传登记、真实 Qwen 生成、重连原任务、结果绑定、MP4 导出、下载解码与评审回填 |
+| 最新设置界面 | 实际保存、刷新恢复、JSON 错误、用途预选、明暗主题和窄窗口检查；Music3 音乐用途持久化；未额外调用 GPU |
+| 代码验证 | 生成与任务相关后端专项、MCP／handler 测试、前端专项及正式构建有通过记录；最新用途调整针对 5 个前端文件执行 73 项测试通过 |
+
+全新 MCP 客户端的一次贯穿验收使用的是“图片生成 → MP4 导出”，没有在同一轮重跑所有视频与音频生成；相关媒体生成由先前独立实机验收覆盖。CLI／MCP 的标准工具数量会随版本变化，以 `tools/list` 为准。
+
+没有宣称全仓测试全绿或生产画质已验收。当前仍有本机 FFmpeg 缺少 subtitles/libass 导致的字幕验证缺口，以及部分测试依赖外部模型目录而发生网络超时。
+
+## 关键代码与文档
+
+| 要处理的工作 | 先读 |
+| --- | --- |
+| Agent 接入与任务操作 | [接入说明](agent-onboarding.md)、[编译内置指南](../backend/cmd/beeftv/agent-guide.md)、`backend/cmd/beeftv/onboarding.go` |
+| 原生协议与恢复 | [后端合同](refactor/native-comfyui-contract.md)、`backend/internal/provider/workflow/native_comfyui.go`、`backend/internal/provider/comfyui/` |
+| 服务检查 | `backend/internal/handler/native_comfyui.go`、`web/src/services/api/native-comfyui.ts` |
+| 设置与用途 | [模型设置](model-settings.md)、`web/src/pages/settings/`、`web/src/lib/model-settings-catalog.ts`、`web/src/lib/native-comfyui.ts` |
+| 合成导出 | `backend/internal/app/task_timeline.go`、`backend/internal/operations/canvas_render.go`、`backend/internal/mediatools/` |
+| 配置持久化与凭据 | [持久化说明](local-model-config-persistence.md)、`backend/internal/workspace/provider_config.go` |
+| 产品与交付 | [协作约定](human-agent-workbench.md)、根 [PRODUCT.md](../PRODUCT.md) |
+
+生成任务应从实时模型配置复制实际 `graph`、`fields`、`outputNodeId`、`outputField`。任务的尺寸、帧数、步数和时长由实际图与映射决定；仅改显示名称或任务文案不会改变固定图参数。视频输出可能位于 `images` 或 `gifs` 字段，以节点真实返回值为准。
+
+## 跨机器参与
+
+### 只参与代码开发
+
+新机器使用独立 checkout／分支，按模块约定文件范围。Git 同步源码、测试和文档；项目数据库、资源、模型配置、凭据和生成媒体不随 Git 同步。Go 与前端依赖以 `backend/go.mod`、Bun 锁文件和构建脚本为准；FFmpeg 能力另行检查。保留 Seal 移植部分的现有 NOTICE 与 MIT 归属。
+
+改动提交到 fork 的协作分支再评审整合；每次交接记录基线 commit、负责范围、变更、验证与剩余问题。多个机器不能靠同步同一份 SQLite 或整份旧画布来协作。编辑运行中的画布前读取最新 revision，冲突时合并用户改动。
+
+### 操作当前机器上的同一个工作区
+
+现有验证部署只监听其主机的 loopback。远端 Agent 的 `127.0.0.1` 指向远端 Agent 自己；原连接 JSON 中的命令路径、数据目录也属于 BeefTV 主机，不能直接复制后期待生效。ComfyUI 主机和 BeefTV 主机是两个角色，连接 GPU 服务不等于连接到 BeefTV 的项目。
+
+可评估 **SSH 承载 MCP stdio**：在 BeefTV 主机上运行既有 `beeftv mcp serve`，让另一台机器通过已授权 SSH 连接读写标准输入输出。下例仅为连接形状，跨机器路径尚未完成端到端实机验收：
+
+```json
+{
+  "mcpServers": {
+    "beeftv": {
+      "command": "ssh",
+      "args": ["-T", "BEEFTV_HOST_ALIAS", "/absolute/path/on/beeftv-host/run-beeftv-mcp"]
+    }
+  }
+}
+```
+
+远端私有启动脚本应使用工作台为该 Agent 签发的独立客户端身份，设置正确的 `BEEFTV_BASE_URL`、`BEEFTV_DATA_DIR`，最后 `exec` 启动主机上的 CLI。凭据保留在主机私有配置中，不写进 SSH 参数、Git 或交接文档。MCP stdout 只传协议消息，诊断走 stderr。
+
+此模式下 `filePath` 由 BeefTV 主机上的 MCP 进程读取；上传另一台机器的素材时，使用工具提供的 base64 文件参数、分片上传，或经授权先传到主机，不能把远端机器的文件路径当成本机路径。
+
+跨机器完成标准：新机器完成握手、读取目标画布与权限；经用户授权上传一份素材、写一个独立测试节点、执行一个低开销生成／导出任务、下载检查，并确认用户界面可见。只做到 SSH 连通或 doctor 成功不能记为全流程通过。
+
+### 在新机器独立部署
+
+新实例有自己的数据目录、客户端身份和模型服务连接。按[接入部署说明](agent-onboarding.md)构建后端与相邻 `cli/beeftv`，按仓库开发／发行脚本启动，配置能从该机器访问的 ComfyUI。需要原项目时，使用受支持的导入导出或协调完整数据迁移；原目录名不能代替数据迁移。
+
+原机器的便捷启动器、Vite 本机身份代理、验收工作流和证据属于部署材料，未作为通用安装器发布。另一台机器只克隆代码不保证拥有这些私有材料；通过授权读取现有工作区配置，或由用户单独交付所需材料。
+
+## 数据与运行边界
+
+- 开发数据位于 checkout 下的 `.local/project-workbench-debug`，是实际业务数据。迁移应同时处理 SQLite、资源文件、模型配置和必要的加密材料；停写／一致性备份后再迁移，凭据另行签发或安全迁移。
+- 已验证工作流以无鉴权 LAN ComfyUI 为主；带鉴权服务和任意第三方节点组合仍需按对应目标验证。
+- 历史上经用户明确批准，为 H3 实例增加了 `--lowvram` 并把内存／内存加交换空间限额提高到 28g/32g。不是原有限额下自然跑通，也不是今后任意改服务的授权。
+- 一次 Compose 标签冲突曾影响另一图片实例，已恢复原代码与挂载、必要运行依赖，并通过真实 Qwen 再生成。这是已经发生的运维影响；后续操作应先核对各实例归属、挂载、队列及回滚材料。
+- 共享 GPU 的服务按串行验证；生产分辨率、时长和并发会改变资源需求。配置模型缓存释放与服务重启是不同操作。
+
+实际服务地址、现有画布 ID、启停脚本和凭据位置由实例持有人私下交付；本文不保存真实凭据或开发者绝对目录。连接后优先从 MCP 发现实时状态。
+
+## 尚未完成与后续顺序
+
+1. **跨机器接入验收**：建立每个 Agent 的独立身份，验证上述远程通道及素材路径，先只读再按授权执行最小业务链路。
+2. **配音与音效**：选择实际模型／工作流，验证必要的文本、音色、参考音频等输入与结果质量。用途入口存在不等于已接入模型。
+3. **生产规格与质量**：用代表性镜头验证更高分辨率、更多步数和更长时长；先评估显存／内存，生成成功与业务验收分别记录。
+4. **统一导出体验**：补齐五种格式的前端选择与参数，验证 libass 字幕环境；图片导出的多图与版式能力另行设计。
+5. **大媒体与恢复边界**：当前输入单文件最多 128 MiB、单次输出响应最多 256 MiB，使用内存与内联结果；MCP 简单上传上限为 64 MiB。需推进受管流式传输，并完善不确定取消的核对体验。
+6. **业务可视化交付**：持续补齐需求、资产来源、版本比较、Agent 评审、用户反馈和下一步，让双方在同一画布对齐，而非只把技术任务成功作为最终交付。
+7. **上游集成与发行**：先确认扩展宿主合同，整理底层与 UI 的贡献边界；桌面安装包、跨平台和迁移仍需独立构建验收。
+
+## 按改动选择验证
+
+仅文档变更检查引用和事实，不触发真实 GPU 任务。设置／协议／MCP 修改分别选择已有测试；以下命令从相应目录执行：
+
+```sh
+# web/
+bun test test/model-settings-catalog.test.ts test/native-comfyui.test.ts test/model-service-presets.test.ts test/channel-model-catalog.test.ts test/workspace-model-config-persistence.test.ts
+bun run build
+
+# backend/
+go test ./internal/provider/comfyui ./internal/provider/workflow ./internal/modelcatalog ./internal/task -count=1
+go test ./cmd/beeftv ./internal/handler -count=1
+```
+
+真实新 Agent 验收入口是 `backend/cmd/beeftv/onboarding_live_test.go` 中的 `TestNewAgentFromMCPConfigOnly`。仅在用户授权真实生成、且提供有效私有 `BEEFTV_ONBOARDING_CONFIG` 后运行；缺少该变量时跳过。它会写入独立验收画布并消耗已配置模型资源。
+
+该实机测试当前针对本机进程配置，检查配置内的客户端身份并上传测试进程本机的文件。SSH 样例不能原样套用此测试；远程验收需适配身份检查与文件传递，或用标准 MCP 客户端按上述完成标准逐项执行。
+
+本机历史样片与运行回执由实例持有人保存，未上传 Git。拿不到原证据时，把对应结论记作既有验收记录，并对当前改动自行复验，不能改称新机器已验证。
