@@ -68,6 +68,8 @@ type Props = {
     folders?: AssetLibraryPickerFolder[];
     initialSelectedIds?: Iterable<string>;
     multiple?: boolean;
+    /** 多选上限；达到后未选项禁用并提示，已选项不受影响。 */
+    maxCount?: number;
     title?: string;
     eyebrow?: string;
     confirmLabel?: (count: number) => string;
@@ -110,6 +112,7 @@ function AssetLibraryPickerModalSession({
     initialFolderId = "all",
     folders = [],
     initialSelectedIds,
+    maxCount,
     multiple = true,
     title = "素材库",
     eyebrow = "参考内容",
@@ -277,7 +280,13 @@ function AssetLibraryPickerModalSession({
             if (!multiple) return current.has(item.id) ? new Set() : new Set([item.id]);
             const next = new Set(current);
             if (next.has(item.id)) next.delete(item.id);
-            else next.add(item.id);
+            else {
+                if (maxCount != null && next.size >= maxCount) {
+                    setError(`已达 ${maxCount} 张上限，请先移除已选素材`);
+                    return current;
+                }
+                next.add(item.id);
+            }
             return next;
         });
     };
@@ -481,7 +490,11 @@ function AssetLibraryPickerModalSession({
                                     <span>正在加载已保存的素材。</span>
                                 </div>
                             ) : visibleItems.length ? (
-                                visibleItems.map((item) => <PickerCard key={item.id} item={item} selected={selected.has(item.id)} onToggle={() => toggle(item)} />)
+                                visibleItems.map((item) => {
+                                    const capped = Boolean(maxCount != null && multiple && !selected.has(item.id) && selected.size >= maxCount);
+                                    const cappedItem = capped ? { ...item, disabledReason: item.disabledReason || `已达 ${maxCount} 张上限` } : item;
+                                    return <PickerCard key={item.id} item={cappedItem} selected={selected.has(item.id)} onToggle={() => toggle(item)} />;
+                                })
                             ) : (
                                 <div className="asset-picker-empty">
                                     <FolderOpen />
