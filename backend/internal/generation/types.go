@@ -86,6 +86,10 @@ type Config struct {
 	APIKey                   string                    `json:"apiKey"`
 	SecretKey                string                    `json:"secretKey"`
 	Headers                  []outbound.OutboundHeader `json:"headers"`
+	AuthType                 string                    `json:"authType,omitempty"`
+	AuthHeader               string                    `json:"authHeader,omitempty"`
+	NegativePrompt           string                    `json:"negativePrompt,omitempty"`
+	Seed                     string                    `json:"seed,omitempty"`
 	Model                    string                    `json:"model"`
 	Size                     string                    `json:"size"`
 	Quality                  string                    `json:"quality"`
@@ -107,6 +111,7 @@ type Config struct {
 	WebappID                 string                    `json:"webappId"`
 	WorkflowJSON             map[string]interface{}    `json:"workflowJson"`
 	WorkflowFields           []WorkflowField           `json:"workflowFields"`
+	ComfyUI                  *workflow.ComfyWorkflow   `json:"comfyui,omitempty"`
 	RunningHubUseWallet      bool                      `json:"runningHubUseWallet"`
 	RunningHubWalletKey      string                    `json:"runningHubWalletApiKey"`
 	RunningHubUploadKey      string                    `json:"runningHubUploadApiKey"`
@@ -128,6 +133,7 @@ type Media struct {
 
 // WorkflowField 是云端工作流字段描述。实现位于 provider/workflow。
 type WorkflowField = workflow.Field
+type ComfyWorkflow = workflow.ComfyWorkflow
 
 type MediaHydrationPolicy struct {
 	ManualURL   bool

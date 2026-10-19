@@ -60,6 +60,7 @@ func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependenci
 	RegisterCreationConversationRoutes(api, svc, dependencies.Conversations)
 	RegisterChannelModelRoutes(api, svc)
 	RegisterCustomRelayRoutes(api, svc)
+	RegisterNativeComfyUIRoutes(api, svc)
 	RegisterTaskRoutes(api, svc, false)
 	RegisterRunningHubRoutes(api, svc, false)
 	RegisterDesktopSkillRoutes(api, svc)

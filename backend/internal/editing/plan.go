@@ -33,6 +33,16 @@ const (
 	KindAudio                 = "audio"
 	KindSubtitle              = "subtitle"
 	KindGap                   = "gap"
+
+	OutputVideo = "video"
+	OutputAudio = "audio"
+	OutputImage = "image"
+
+	FormatMP4  = "mp4"
+	FormatWAV  = "wav"
+	FormatMP3  = "mp3"
+	FormatPNG  = "png"
+	FormatJPEG = "jpeg"
 )
 
 // Project is the TimelineProject v2 snapshot shared with the frontend.
@@ -95,19 +105,23 @@ type SourceMeta struct {
 }
 
 type Options struct {
-	Width         int   `json:"width"`
-	Height        int   `json:"height"`
-	FPS           int   `json:"fps"`
-	SampleRate    int   `json:"sampleRate"`
-	BurnSubtitles *bool `json:"burnSubtitles"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	FPS           int    `json:"fps"`
+	SampleRate    int    `json:"sampleRate"`
+	BurnSubtitles *bool  `json:"burnSubtitles"`
+	Output        string `json:"output,omitempty"`
+	Format        string `json:"format,omitempty"`
 }
 
 type Output struct {
-	Width         int  `json:"width"`
-	Height        int  `json:"height"`
-	FPS           int  `json:"fps"`
-	SampleRate    int  `json:"sampleRate"`
-	BurnSubtitles bool `json:"burnSubtitles"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	FPS           int    `json:"fps"`
+	SampleRate    int    `json:"sampleRate"`
+	BurnSubtitles bool   `json:"burnSubtitles"`
+	Output        string `json:"output"`
+	Format        string `json:"format"`
 }
 
 // Plan is the versioned semantic timeline render plan.
@@ -156,11 +170,15 @@ type Subtitle struct {
 
 func DefaultOptions() Options {
 	burn := true
-	return Options{Width: DefaultWidth, Height: DefaultHeight, FPS: DefaultFPS, SampleRate: DefaultSampleRate, BurnSubtitles: &burn}
+	return Options{Width: DefaultWidth, Height: DefaultHeight, FPS: DefaultFPS, SampleRate: DefaultSampleRate, BurnSubtitles: &burn, Output: OutputVideo, Format: FormatMP4}
 }
 
 // NormalizeOptions fills omitted output fields, then rejects encoder-impossible values.
 func NormalizeOptions(opts Options) (Options, error) {
+	if opts.Output == "" && opts.Format == "" {
+		opts.Output = OutputVideo
+		opts.Format = FormatMP4
+	}
 	if opts.Width == 0 {
 		opts.Width = DefaultWidth
 	}
@@ -172,6 +190,20 @@ func NormalizeOptions(opts Options) (Options, error) {
 	}
 	if opts.SampleRate == 0 {
 		opts.SampleRate = DefaultSampleRate
+	}
+	opts.Output = strings.TrimSpace(opts.Output)
+	opts.Format = strings.TrimSpace(opts.Format)
+	validFormat := false
+	switch opts.Output {
+	case OutputVideo:
+		validFormat = opts.Format == FormatMP4
+	case OutputAudio:
+		validFormat = opts.Format == FormatWAV || opts.Format == FormatMP3
+	case OutputImage:
+		validFormat = opts.Format == FormatPNG || opts.Format == FormatJPEG
+	}
+	if !validFormat {
+		return opts, ErrInvalidOutput
 	}
 	if opts.BurnSubtitles == nil {
 		burn := true

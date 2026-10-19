@@ -725,6 +725,38 @@ paths:
           $ref: "#/components/responses/Envelope"
         "400":
           $ref: "#/components/responses/Error"
+  /configured-providers/comfyui/inspect:
+    post:
+      tags: [models]
+      summary: 只读检查目标原生 ComfyUI
+      description: |
+        使用请求中的目标地址与鉴权读取目标服务 /system_stats 与 /object_info。
+        不安装节点、不上传文件、不提交 prompt，也不修改或重启目标 ComfyUI。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [baseUrl]
+              properties:
+                baseUrl: { type: string }
+                authType: { type: string, enum: [none, bearer, header] }
+                apiKey: { type: string }
+                authHeader: { type: string }
+                headers:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, value]
+                    properties:
+                      name: { type: string }
+                      value: { type: string }
+      responses:
+        "200":
+          $ref: "#/components/responses/Envelope"
+        "400":
+          $ref: "#/components/responses/Error"
   /tasks:
     post:
       tags: [tasks]

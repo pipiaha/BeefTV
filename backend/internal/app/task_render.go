@@ -13,8 +13,6 @@ import (
 	"infinite-canvas/backend/internal/model"
 )
 
-const timelineRenderFileName = "timeline-render.mp4"
-
 func timelineRenderArtifactIdentity(taskID string) string {
 	return strings.TrimSpace(taskID) + ":0"
 }
@@ -26,6 +24,10 @@ func (w *taskWorkerCoordinator) processTimelineRender(task *model.Task, ctx cont
 		return w.failTimelineTask(task, "渲染失败", "任务缺少有效的时间线快照")
 	}
 	plan, err := editing.Compile(input.Timeline, nil, input.Options)
+	if err != nil {
+		return w.failTimelineTask(task, "渲染失败", err.Error())
+	}
+	artifactKind, artifactFileName, artifactMIME, err := editing.RenderArtifact(plan.Output)
 	if err != nil {
 		return w.failTimelineTask(task, "渲染失败", err.Error())
 	}
@@ -55,7 +57,7 @@ func (w *taskWorkerCoordinator) processTimelineRender(task *model.Task, ctx cont
 		}
 		renderFile = file
 		return localasset.RecoveredArtifact{
-			Kind: "video", FileName: timelineRenderFileName, MimeType: "video/mp4",
+			Kind: artifactKind, FileName: artifactFileName, MimeType: artifactMIME,
 			Size: rendered.Size, Width: rendered.Width, Height: rendered.Height,
 			DurationMs: rendered.DurationMs, Body: file,
 		}, nil
@@ -66,17 +68,41 @@ func (w *taskWorkerCoordinator) processTimelineRender(task *model.Task, ctx cont
 	if resource == nil {
 		return w.failTimelineTask(task, "渲染失败", "保存渲染产物失败")
 	}
+	if resource.Kind != artifactKind || resource.MimeType != artifactMIME {
+		return w.failTimelineTask(task, "渲染失败", "渲染产物类型与导出计划不一致")
+	}
 	if err := w.progress(task, "写入资源…", 85); err != nil {
 		return err
 	}
 
+	output := map[string]any{
+		"resourceId": resource.ID,
+		"mimeType":   resource.MimeType,
+		"fileName":   artifactFileName,
+	}
+	if resource.DurationMs > 0 {
+		output["durationMs"] = resource.DurationMs
+	}
+	if resource.Width > 0 && resource.Height > 0 {
+		output["width"] = resource.Width
+		output["height"] = resource.Height
+	}
 	result := timelineRenderResult{
-		Video:       map[string]any{"resourceId": resource.ID, "mimeType": "video/mp4", "fileName": timelineRenderFileName, "durationMs": resource.DurationMs},
+		Kind:        artifactKind,
+		MimeType:    artifactMIME,
 		ResourceID:  resource.ID,
-		FileName:    timelineRenderFileName,
+		FileName:    artifactFileName,
 		Size:        resource.Size,
 		DurationMs:  resource.DurationMs,
 		SubtitleSRT: plan.SubtitleSRT,
+	}
+	switch plan.Output.Output {
+	case editing.OutputAudio:
+		result.Audio = output
+	case editing.OutputImage:
+		result.Image = output
+	default:
+		result.Video = output
 	}
 	payload, err := json.Marshal(result)
 	if err != nil {
@@ -94,6 +120,10 @@ func (w *taskWorkerCoordinator) processTimelineRender(task *model.Task, ctx cont
 	if err := s.DeliverSucceededTask(*task); err != nil {
 		return fmt.Errorf("本地渲染完成后的素材交付失败：%w", err)
 	}
-	s.logInfo(task.UserID, task.ID, fmt.Sprintf("时间线渲染完成，时长 %.1fs", float64(resource.DurationMs)/1000), "")
+	if plan.Output.Output == editing.OutputImage {
+		s.logInfo(task.UserID, task.ID, fmt.Sprintf("时间线渲染完成，%s 联系表 %dx%d", strings.ToUpper(plan.Output.Format), resource.Width, resource.Height), "")
+	} else {
+		s.logInfo(task.UserID, task.ID, fmt.Sprintf("时间线渲染完成，时长 %.1fs", float64(resource.DurationMs)/1000), "")
+	}
 	return nil
 }

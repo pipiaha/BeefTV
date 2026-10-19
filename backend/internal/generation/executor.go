@@ -34,10 +34,6 @@ func Execute(ctx context.Context, input Input) (map[string]any, error) {
 		}
 		input.Prompt = compiled
 	}
-	if strings.TrimSpace(input.Prompt) == "" {
-		return nil, errors.New("prompt is required")
-	}
-
 	if runtime.Config != nil {
 		config, err := runtime.Config.Resolve(input.Config)
 		if err != nil {
@@ -46,6 +42,9 @@ func Execute(ctx context.Context, input Input) (map[string]any, error) {
 		input.Config = config
 	} else if strings.TrimSpace(input.Config.ChannelID) != "" {
 		return nil, errors.New("无法解析系统渠道配置")
+	}
+	if strings.TrimSpace(input.Prompt) == "" && !workflow.IsNativeComfyInterface(input.Config.InterfaceType) {
+		return nil, errors.New("prompt is required")
 	}
 	applyCanvasTextStreaming(runtime.Call.TaskType, &input)
 	if input.Mode == "image" && providerpreset.IsBeefAPIEndpoint(input.Config.BaseURL) {
@@ -282,10 +281,15 @@ func workflowConfig(config Config) workflow.Config {
 		AudioSpeed:            config.AudioSpeed,
 		AudioInstructions:     config.AudioInstructions,
 		SystemPrompt:          config.SystemPrompt,
+		AuthType:              config.AuthType,
+		AuthHeader:            config.AuthHeader,
+		NegativePrompt:        config.NegativePrompt,
+		Seed:                  config.Seed,
 		WorkflowID:            config.WorkflowID,
 		WebappID:              config.WebappID,
 		WorkflowJSON:          config.WorkflowJSON,
 		WorkflowFields:        config.WorkflowFields,
+		ComfyUI:               config.ComfyUI,
 		RunningHubUploadKey:   config.RunningHubUploadKey,
 	}
 }

@@ -39,7 +39,7 @@ type TaskSelectResult struct {
 // Workflow-plugin authorization stays a cross-domain bridge in the caller.
 func SelectTaskModel(req TaskSelectRequest, lookup TaskSelectLookup) (TaskSelectResult, error) {
 	input := req.Input
-	customChannelTask := TaskInputUsesCustomChannel(input)
+	customChannelTask := TaskInputUsesCustomChannel(input) || TaskInputUsesNativeComfyProvider(input)
 	if req.FrontendEnabled && !TaskInputUsesSystemChannel(input) && !customChannelTask {
 		if strings.TrimSpace(req.LogicalModelID) == "" {
 			return TaskSelectResult{}, InvalidModelSelection("前台模型模式下必须指定 logicalModelId")
@@ -300,6 +300,29 @@ func IsWorkflowInterfaceType(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case string(model.ChannelInterfaceRunningHubImage), string(model.ChannelInterfaceRunningHubVideo), string(model.ChannelInterfaceRunningHubAudio):
 		return true
+	case string(model.ChannelInterfaceNativeComfyImage), string(model.ChannelInterfaceNativeComfyVideo), string(model.ChannelInterfaceNativeComfyAudio):
+		return true
+	default:
+		return false
+	}
+}
+
+func TaskInputUsesNativeComfyProvider(input map[string]any) bool {
+	config, ok := input["config"].(map[string]any)
+	if !ok {
+		return false
+	}
+	if !IsNativeComfyInterfaceType(admissionString(config["interfaceType"])) {
+		return false
+	}
+	workflow, _ := config["comfyui"].(map[string]any)
+	return len(workflow) > 0
+}
+
+func IsNativeComfyInterfaceType(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(model.ChannelInterfaceNativeComfyImage), string(model.ChannelInterfaceNativeComfyVideo), string(model.ChannelInterfaceNativeComfyAudio):
+		return true
 	default:
 		return false
 	}
@@ -312,6 +335,10 @@ func HasExecutableVideoConfig(input map[string]any) bool {
 		return false
 	}
 	interfaceType := admissionString(config["interfaceType"])
+	if IsNativeComfyInterfaceType(interfaceType) {
+		workflow, _ := config["comfyui"].(map[string]any)
+		return admissionString(config["baseUrl"]) != "" && len(workflow) > 0
+	}
 	if IsWorkflowInterfaceType(interfaceType) {
 		if admissionString(config["workflowId"]) == "" && admissionString(config["webappId"]) == "" && admissionString(config["model"]) == "" {
 			return false

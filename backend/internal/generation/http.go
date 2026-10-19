@@ -30,7 +30,9 @@ var ErrVideoJSONRequestTooLarge = errors.New("video request body exceeds the 64 
 type submissionKeyContext struct{}
 type binaryNoRedirectContext struct{}
 
-func doBinaryWithoutRedirect(req *http.Request) ([]byte, string, error) {
+// DoBinaryWithoutRedirect keeps provider credentials and POST bodies on the
+// configured endpoint. Redirects are returned as unsuccessful HTTP responses.
+func DoBinaryWithoutRedirect(req *http.Request) ([]byte, string, error) {
 	return DoBinary(req.WithContext(context.WithValue(req.Context(), binaryNoRedirectContext{}, true)))
 }
 

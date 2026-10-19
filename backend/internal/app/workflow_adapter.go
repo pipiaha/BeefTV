@@ -45,15 +45,21 @@ func workflowConfigFromProvider(config providerConfig) workflow.Config {
 		AudioSpeed:            config.AudioSpeed,
 		AudioInstructions:     config.AudioInstructions,
 		SystemPrompt:          config.SystemPrompt,
+		AuthType:              config.AuthType,
+		AuthHeader:            config.AuthHeader,
+		NegativePrompt:        config.NegativePrompt,
+		Seed:                  config.Seed,
 		WorkflowID:            config.WorkflowID,
 		WebappID:              config.WebappID,
 		WorkflowJSON:          config.WorkflowJSON,
 		WorkflowFields:        config.WorkflowFields,
+		ComfyUI:               config.ComfyUI,
 		RunningHubUploadKey:   config.RunningHubUploadKey,
 	}
 }
 
 func (s *Service) workflowInputFromCanvas(ctx context.Context, input canvasGenerationInput) workflow.Input {
+	call := canonicalCallMeta(ctx)
 	converted := workflow.Input{
 		Mode:             input.Mode,
 		Prompt:           input.Prompt,
@@ -63,6 +69,7 @@ func (s *Service) workflowInputFromCanvas(ctx context.Context, input canvasGener
 		ReferenceAudios:  workflowMediaList(input.ReferenceAudios),
 		ResumedRequestID: resumedProviderRequestID(ctx),
 		LocalWorkspace:   s.IsLocalMode(),
+		ClientID:         firstNonEmpty(call.TaskID, call.RequestID, call.TraceID),
 	}
 	if input.Mask != nil {
 		media := workflowMedia(*input.Mask)
@@ -124,7 +131,11 @@ func (workflowRequestExecutor) Execute(ctx context.Context, req workflow.Request
 		httpReq.Header.Set("Content-Type", req.ContentType)
 	}
 	ApplyOutboundHeaders(httpReq, req.Headers)
-	data, mimeType, err := doBinary(httpReq)
+	execute := doBinary
+	if req.NoRedirect {
+		execute = generation.DoBinaryWithoutRedirect
+	}
+	data, mimeType, err := execute(httpReq)
 	if err != nil {
 		var httpErr providerHTTPError
 		if errors.As(err, &httpErr) {
@@ -228,7 +239,9 @@ func (p workflowVideoPoller) appPolicy(policy workflow.PollPolicy) videoPollPoli
 	if p.policy != nil {
 		appPolicy = *p.policy
 	}
-	if policy.InitialDelay > 0 {
+	if policy.SkipInitialDelay {
+		appPolicy.InitialDelay = 0
+	} else if policy.InitialDelay > 0 {
 		appPolicy.InitialDelay = policy.InitialDelay
 	}
 	if policy.Interval > 0 {

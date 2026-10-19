@@ -43,10 +43,6 @@ func (s *Service) admit(userID string, req CreateRequest) (*model.Task, error) {
 	if s.deps.Runtime.IsDraining() {
 		return nil, drainError(DrainCreateMessage)
 	}
-	prompt := strings.TrimSpace(req.Prompt)
-	if prompt == "" {
-		return nil, kernel.BadAuthRequest(PromptRequiredMessage)
-	}
 	taskType := strings.TrimSpace(req.Type)
 	if err := ValidateType(taskType); err != nil {
 		return nil, kernel.BadAuthRequest(err.Error())
@@ -54,6 +50,10 @@ func (s *Service) admit(userID string, req CreateRequest) (*model.Task, error) {
 	normalizedInput, err := NormalizeInput(req.Input)
 	if err != nil {
 		return nil, err
+	}
+	prompt := strings.TrimSpace(req.Prompt)
+	if prompt == "" && !taskInputAllowsEmptyPrompt(normalizedInput) {
+		return nil, kernel.BadAuthRequest(PromptRequiredMessage)
 	}
 	if err := s.validateRetryType(userID, taskType, normalizedInput); err != nil {
 		return nil, err
@@ -188,6 +188,19 @@ func (s *Service) admit(userID string, req CreateRequest) (*model.Task, error) {
 		s.log(userID, task.ID, "info", "任务已进入队列", "")
 	}
 	return presentTask(s.deps.Present, task)
+}
+
+func taskInputAllowsEmptyPrompt(input map[string]any) bool {
+	config, _ := input["config"].(map[string]any)
+	interfaceType, _ := config["interfaceType"].(string)
+	switch strings.ToLower(strings.TrimSpace(interfaceType)) {
+	case string(model.ChannelInterfaceNativeComfyImage),
+		string(model.ChannelInterfaceNativeComfyVideo),
+		string(model.ChannelInterfaceNativeComfyAudio):
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) requireAdmitCollaborators() error {

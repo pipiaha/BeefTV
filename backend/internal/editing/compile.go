@@ -38,10 +38,13 @@ func Compile(project Project, sources []SourceMeta, opts Options) (*Plan, error)
 			FPS:           opts.FPS,
 			SampleRate:    opts.SampleRate,
 			BurnSubtitles: *opts.BurnSubtitles,
+			Output:        opts.Output,
+			Format:        opts.Format,
 		},
 	}
 
 	end := project.DurationMs
+	audioEnd := int64(0)
 	var visual []Clip
 	for _, clip := range project.Clips {
 		if len(project.Tracks) > 0 {
@@ -65,6 +68,12 @@ func Compile(project Project, sources []SourceMeta, opts Options) (*Plan, error)
 		if clip.DurationMs > 0 && clipEnd > end {
 			end = clipEnd
 		}
+		if opts.Output == OutputAudio && clip.Kind != KindAudio {
+			return plan, fmt.Errorf("%w：音频导出只支持音频片段", ErrUnsupportedKind)
+		}
+		if opts.Output == OutputImage && clip.Kind != KindImage {
+			return plan, fmt.Errorf("%w：图片联系表只支持静态图片片段", ErrUnsupportedKind)
+		}
 		switch clip.Kind {
 		case KindAudio:
 			if clip.DurationMs <= 0 {
@@ -79,6 +88,14 @@ func Compile(project Project, sources []SourceMeta, opts Options) (*Plan, error)
 			}
 			if source.HasAudio != nil && !*source.HasAudio {
 				return plan, ErrMissingAudioTrack
+			}
+			if opts.Output == OutputAudio {
+				if err := validateSourceKind(source, KindAudio); err != nil {
+					return plan, fmt.Errorf("%w：%s", err, clipLabel(clip))
+				}
+			}
+			if clipEnd > audioEnd {
+				audioEnd = clipEnd
 			}
 			plan.Audio = append(plan.Audio, AudioClip{
 				ClipID:        clip.ID,
@@ -154,6 +171,11 @@ func Compile(project Project, sources []SourceMeta, opts Options) (*Plan, error)
 		if clip.Kind == KindVideo && source.HasVideo != nil && !*source.HasVideo {
 			return plan, fmt.Errorf("%w：%s", ErrMissingVideoTrack, clipLabel(clip))
 		}
+		if opts.Output == OutputImage && clip.Kind == KindImage && source.Kind != "" {
+			if err := validateSourceKind(source, KindImage); err != nil {
+				return plan, fmt.Errorf("%w：%s", err, clipLabel(clip))
+			}
+		}
 		if clip.Kind == KindImage {
 			hasAudio = false
 		}
@@ -175,22 +197,43 @@ func Compile(project Project, sources []SourceMeta, opts Options) (*Plan, error)
 			return plan, fmt.Errorf("%w：%s", err, clipLabel(clip))
 		}
 	}
-	if end > cursor {
+	if opts.Output == OutputVideo && end > cursor {
 		plan.Segments = append(plan.Segments, gapSegment(cursor, end-cursor))
 	}
-	plan.DurationMs = 0
-	for _, seg := range plan.Segments {
-		sum, err := addDuration(plan.DurationMs, seg.DurationMs)
-		if err != nil {
-			return plan, err
+	switch opts.Output {
+	case OutputAudio:
+		plan.DurationMs = audioEnd
+	case OutputImage:
+		plan.DurationMs = 0
+	default:
+		plan.DurationMs = 0
+		for _, seg := range plan.Segments {
+			sum, err := addDuration(plan.DurationMs, seg.DurationMs)
+			if err != nil {
+				return plan, err
+			}
+			plan.DurationMs = sum
 		}
-		plan.DurationMs = sum
 	}
-	if *opts.BurnSubtitles {
+	if opts.Output == OutputVideo && *opts.BurnSubtitles {
 		plan.SubtitleSRT = buildSubtitleSRT(plan.Subtitles)
 	} else {
 		plan.Subtitles = nil
 		plan.SubtitleSRT = ""
+	}
+	if opts.Output == OutputAudio && len(plan.Audio) == 0 {
+		return plan, ErrNoMedia
+	}
+	if opts.Output == OutputImage {
+		imageCount := 0
+		for _, segment := range plan.Segments {
+			if segment.Kind == KindImage {
+				imageCount++
+			}
+		}
+		if imageCount != 2 {
+			return plan, fmt.Errorf("%w：图片联系表需要正好两张静态图片", ErrInvalidClip)
+		}
 	}
 	if !plan.HasMedia() {
 		return plan, ErrNoMedia
@@ -315,6 +358,14 @@ func validateSourceTiming(clip Clip, source SourceMeta, sourcesProvided bool) er
 		return fmt.Errorf("%w：%s", ErrInsufficientDuration, clipLabel(clip))
 	}
 	return nil
+}
+
+func validateSourceKind(source SourceMeta, expected string) error {
+	kind := strings.TrimSpace(source.Kind)
+	if kind == "" || kind == expected {
+		return nil
+	}
+	return fmt.Errorf("%w：%s 应为 %s 素材", ErrUnsupportedKind, kind, expected)
 }
 
 func clipLabel(clip Clip) string {

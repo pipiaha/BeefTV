@@ -994,7 +994,7 @@
   },
   {
     "id": "canvas.timeline.render",
-    "summary": "免费本地渲染已保存的时间线，返回任务以供查询成片；不调用付费生成",
+    "summary": "免费本地导出已保存的时间线：MP4 成片、WAV/MP3 音频或两张图片的 PNG/JPEG 联系表；不调用付费生成",
     "readOnly": false,
     "scope": "canvas",
     "params": {
@@ -1011,15 +1011,34 @@
           "type": "string"
         },
         "options": {
+          "description": "output+format 必须匹配：video/mp4、audio/wav、audio/mp3、image/png、image/jpeg。audio 只导出音频片段；image 需要正好两张静态图片。",
           "properties": {
             "burnSubtitles": {
               "type": "boolean"
+            },
+            "format": {
+              "enum": [
+                "mp4",
+                "wav",
+                "mp3",
+                "png",
+                "jpeg"
+              ],
+              "type": "string"
             },
             "fps": {
               "type": "integer"
             },
             "height": {
               "type": "integer"
+            },
+            "output": {
+              "enum": [
+                "video",
+                "audio",
+                "image"
+              ],
+              "type": "string"
             },
             "sampleRate": {
               "type": "integer"

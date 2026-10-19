@@ -30,10 +30,11 @@ func TestGeminiProviderCancellationAndConfirmation(t *testing.T) {
 	defer server.Close()
 
 	config := providerConfig{InterfaceType: "gemini-veo", BaseURL: server.URL, APIKey: "test-key"}
-	if err := cancelProviderTask(context.Background(), config, "operations/video-1"); err != nil {
+	service := &Service{}
+	if err := service.cancelProviderTask(context.Background(), config, "operations/video-1"); err != nil {
 		t.Fatal(err)
 	}
-	outcome, _, err := queryProviderCancellation(context.Background(), config, "operations/video-1")
+	outcome, _, err := service.queryProviderCancellation(context.Background(), config, "operations/video-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +60,8 @@ func TestVolcengineArkProviderCancellationUsesDelete(t *testing.T) {
 	defer server.Close()
 
 	config := providerConfig{InterfaceType: "volcengine-ark-video", BaseURL: server.URL + "/api/v3", APIKey: "test-key"}
-	if err := cancelProviderTask(context.Background(), config, "task-1"); err != nil {
+	service := &Service{}
+	if err := service.cancelProviderTask(context.Background(), config, "task-1"); err != nil {
 		t.Fatal(err)
 	}
 }

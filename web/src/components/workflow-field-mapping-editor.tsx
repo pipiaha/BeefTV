@@ -75,7 +75,7 @@ export function WorkflowFieldMappingEditor({ fields, onChange, disabled = false 
         <div className="workflow-field-mapping-editor space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-foreground/60">
-                    共 {fields.length} 个字段，已开启 {enabledCount} 个。字段调整会立即保存到当前工作流。
+                    共 {fields.length} 个字段，已开启 {enabledCount} 个。字段调整会立即更新当前编辑中的工作流。
                 </p>
                 <div className="flex flex-wrap items-center gap-1">
                     <Button type="text" size="small" icon={<Power className="size-3.5" />} disabled={disabled || enabledControllableCount === controllableFields.length} onClick={() => updateAllFields(true)}>

@@ -44,6 +44,11 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 		}
 		fields[key], _ = json.Marshal(string(raw))
 	}
+	if _, ok := fields["comfyui"]; !ok {
+		if raw, ok := fields["comfyUI"]; ok {
+			fields["comfyui"] = raw
+		}
+	}
 	normalized, err := json.Marshal(fields)
 	if err != nil {
 		return err

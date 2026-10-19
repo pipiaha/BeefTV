@@ -11,6 +11,7 @@ import (
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/outbound"
+	"infinite-canvas/backend/internal/provider/workflow"
 )
 
 type appResourcePort struct{ service *Service }
@@ -250,6 +251,9 @@ func (p appConfigPort) ApplyCapabilities(ctx context.Context, input *generation.
 }
 
 func (p appConfigPort) RequireWorkflow(interfaceType string) error {
+	if workflow.IsNativeComfyInterface(interfaceType) {
+		return nil
+	}
 	if p.service == nil {
 		return errors.New("无法执行工作流任务，请重试")
 	}

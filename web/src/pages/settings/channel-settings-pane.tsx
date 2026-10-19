@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { ModelEditorModal } from "@/components/model-editor-modal";
 import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/channel-headers-editor";
 import { WorkspaceState } from "@/components/layout/workspace-state";
+import { isNativeComfyProtocol } from "@/lib/native-comfyui";
 import { PageHeader } from "@/components/layout/workspace-page";
 import { mergeFetchedChannelModelProfiles } from "@/lib/channel-model-catalog";
 import { seedancePortraitModel } from "@/lib/seedance-portrait";
@@ -13,6 +14,7 @@ import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api
 import { channelHasGenerationCredential, channelHasManagedBeefAPICredential, createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, isBuiltinBeefAPIChannel, modelOptionsFromChannels, normalizeConfigSnapshot, useConfigStore, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { ChannelModelSettings } from "./channel-model-settings";
 import { ModelServiceEditor } from "./model-service-editor";
+import { NativeComfySettingsModal } from "./native-comfy-settings-modal";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
 import { ModelLogo } from "@/components/model-logo";
 import beefTVAppIcon from "../../../../assets/app-icon.png";
@@ -43,6 +45,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
     const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
     const [newChannelId, setNewChannelId] = useState<string | null>(null);
     const [serviceEditor, setServiceEditor] = useState<ModelChannel | null | undefined>(undefined);
+    const [nativeComfyEditor, setNativeComfyEditor] = useState<ModelChannel | null | undefined>(undefined);
     const [beefConnection, setBeefConnection] = useState<BeefAPIConnectionSummary | null>(null);
     const [beefBusy, setBeefBusy] = useState(false);
     const appliedConnectionState = useRef<string | undefined>(undefined);
@@ -138,6 +141,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
     };
     const userChannels = config.channels.filter((channel) => channel.scope !== "system");
     const runningHubReady = Boolean(config.runningHub.enabled && config.runningHub.baseUrl.trim() && config.runningHub.apiKey.trim() && config.runningHub.workflowId.trim());
+    const nativeComfyChannels = userChannels.filter(isNativeComfyChannel);
 
     const updateChannels = (channels: ModelChannel[], baseConfig = config) => {
         replaceConfig(withChannels(baseConfig, channels));
@@ -178,7 +182,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
         setServiceEditor(null);
     };
 
-    const saveService = async (channel: ModelChannel) => {
+    const saveService = async (channel: ModelChannel, successMessage = "模型服务已保存，可在创作页选择模型") => {
         cancelCatalog(channel.id);
         const latest = useConfigStore.getState().config;
         const channels = latest.channels.some((item) => item.id === channel.id)
@@ -188,7 +192,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
         await flushModelConfig();
         const saved = getModelConfigPersistenceState();
         if (saved.status === "error" || saved.dirty) throw new Error(saved.error || "模型服务尚未保存，请重试");
-        message.success("模型服务已保存，可在创作页选择模型");
+        message.success(successMessage);
     };
 
     const closeChannelEditor = () => {
@@ -264,11 +268,12 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
     };
 
     const refreshAllModels = async () => {
-        const runnable = userChannels.filter((channel) => !channelConnectionError(channel, isBuiltinBeefAPIChannel(channel) ? beefConnection : null));
-        const skipped = userChannels.filter((channel) => channelConnectionError(channel, isBuiltinBeefAPIChannel(channel) ? beefConnection : null));
+        const catalogChannels = userChannels.filter((channel) => !isNativeComfyChannel(channel));
+        const runnable = catalogChannels.filter((channel) => !channelConnectionError(channel, isBuiltinBeefAPIChannel(channel) ? beefConnection : null));
+        const skipped = catalogChannels.filter((channel) => channelConnectionError(channel, isBuiltinBeefAPIChannel(channel) ? beefConnection : null));
         if (!runnable.length) {
             const detail = skipped.map((channel) => `${channel.name || "未命名渠道"}：${channelConnectionError(channel, isBuiltinBeefAPIChannel(channel) ? beefConnection : null)}`).join("；");
-            message.error(detail || "没有可拉取的个人模型渠道，请先填写有效 Base URL 和 API Key");
+            message.error(detail || (catalogChannels.length ? "没有可拉取的个人模型渠道，请先填写有效 Base URL 和 API Key" : "原生 ComfyUI 渠道不使用模型目录拉取，请在渠道卡片中编辑工作流"));
             return;
         }
         setChannelLoading("all", true);
@@ -340,37 +345,47 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
                     </div>
                 )}
             />
-            {onOpenRunningHub ? (
-                <section className="settings-section mb-3">
-                    <div className="mb-3">
+            <section className="settings-section mb-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div>
                         <h3 className="text-sm font-semibold">个人工作流渠道</h3>
-                        <p className="mt-1 text-xs text-foreground/55">RunningHub 使用独立的云端工作流参数与执行通道。</p>
+                        <p className="mt-1 text-xs text-foreground/55">为本机或局域网 ComfyUI 保存工作流；每个服务可以使用不同地址。</p>
                     </div>
-                    <div className="grid gap-2 lg:grid-cols-2">
-                        {onOpenRunningHub ? (
-                            <WorkflowChannelEntry
-                                icon={<Workflow className="size-4" />}
-                                title="RunningHub"
-                                description="云端工作流和 RunningHub App"
-                                status={runningHubReady ? `${config.runningHub.workflows.length} 个工作流已配置` : config.runningHub.enabled ? "待完成连接和工作流配置" : "未启用"}
-                                ready={runningHubReady}
-                                onOpen={onOpenRunningHub}
-                            />
-                        ) : null}
-                    </div>
-                </section>
-            ) : null}
+                    <Button icon={<Plus className="size-4" />} onClick={() => setNativeComfyEditor(null)}>新增 ComfyUI 服务</Button>
+                </div>
+                <div className="grid gap-2 lg:grid-cols-2">
+                    {onOpenRunningHub ? (
+                        <WorkflowChannelEntry
+                            icon={<Workflow className="size-4" />}
+                            title="RunningHub"
+                            description="云端工作流和 RunningHub App"
+                            status={runningHubReady ? `${config.runningHub.workflows.length} 个工作流已配置` : config.runningHub.enabled ? "待完成连接和工作流配置" : "未启用"}
+                            ready={runningHubReady}
+                            onOpen={onOpenRunningHub}
+                        />
+                    ) : null}
+                    <WorkflowChannelEntry
+                        icon={<Workflow className="size-4" />}
+                        title="ComfyUI"
+                        description="原生 API 工作流模型"
+                        status={nativeComfyChannels.length ? `${nativeComfyChannels.reduce((count, channel) => count + (channel.modelProfiles?.filter((profile) => profile.comfyui).length || 0), 0)} 个已保存工作流` : "未配置"}
+                        ready={nativeComfyChannels.length > 0}
+                        onOpen={() => setNativeComfyEditor(nativeComfyChannels[0] || null)}
+                    />
+                </div>
+            </section>
             {userChannels.length ? (
                 <div className="settings-channel-list space-y-2">
                     {userChannels.map((channel) => {
                         const editing = editingChannelId === channel.id;
                         const builtinBeefAPI = isBuiltinBeefAPIChannel(channel);
+                        const nativeComfy = isNativeComfyChannel(channel);
                         return (
                             <section key={channel.id} data-onboarding={builtinBeefAPI ? "official-channel" : undefined} aria-labelledby={`channel-${channel.id}-title`} className="settings-channel p-2.5 sm:p-3">
                                 <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2.5">
                                     <div className="min-w-0 flex-1 basis-52">
                                         <h3 id={`channel-${channel.id}-title`} className="flex items-center gap-2 text-sm font-semibold">
-                                            {builtinBeefAPI ? <img src={beefTVAppIcon} alt="" className="size-5 shrink-0 object-contain" draggable={false} /> : <ModelLogo icon={MODEL_SERVICE_PRESETS.find((preset) => preset.id === servicePresetFor(channel))?.icon} size={20} />}
+                                            {builtinBeefAPI ? <img src={beefTVAppIcon} alt="" className="size-5 shrink-0 object-contain" draggable={false} /> : nativeComfy ? <Workflow className="size-5 shrink-0" /> : <ModelLogo icon={MODEL_SERVICE_PRESETS.find((preset) => preset.id === servicePresetFor(channel))?.icon} size={20} />}
                                             {builtinBeefAPI ? "BeefTV" : channel.name || "未命名渠道"}
                                         </h3>
                                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground/55">
@@ -384,7 +399,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
                                             )}
                                             <ChannelStatus channel={channel} persistence={persistence} connection={builtinBeefAPI ? beefConnection : null} />
                                         </div>
-                                        {!builtinBeefAPI && <p className="mt-1 break-all text-xs text-foreground/50">模型目录地址：{modelCatalogRequestURL(channel)}</p>}
+                                        {!builtinBeefAPI && <p className="mt-1 break-all text-xs text-foreground/50">{nativeComfy ? `服务地址：${channel.baseUrl || "未配置"}` : `模型目录地址：${modelCatalogRequestURL(channel)}`}</p>}
                                     </div>
                                     <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto sm:shrink-0">
                                         {builtinBeefAPI && catalogSyncFailed ? <Button loading={beefBusy} onClick={() => void runBeefAction(getBeefAPIConnection, "无法更新模型列表")}>重试更新模型列表</Button> : null}
@@ -406,7 +421,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
                                             size="small"
                                             icon={<RefreshCw className="size-3.5" />}
                                             loading={loadingChannelIds.includes(channel.id)}
-                                            disabled={loadingChannelIds.includes("all") || (builtinBeefAPI && beefConnection?.state !== "connected")}
+                                            disabled={nativeComfy || loadingChannelIds.includes("all") || (builtinBeefAPI && beefConnection?.state !== "connected")}
                                             onClick={() => void refreshChannelModels(channel)}
                                         >
                                             拉取模型
@@ -416,6 +431,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
                                             icon={<Pencil className="size-3.5" />}
                                             onClick={() => {
                                                 cancelCatalog(channel.id);
+                                                if (nativeComfy) { setNativeComfyEditor(channel); return; }
                                                 if (!builtinBeefAPI) { setServiceEditor(channel); return; }
                                                 setNewChannelId(null);
                                                 setEditingChannelId(channel.id);
@@ -570,6 +586,17 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
                 />
             )}
             {serviceEditor !== undefined && <ModelServiceEditor initial={serviceEditor || undefined} onClose={() => setServiceEditor(undefined)} onSave={saveService} />}
+            {nativeComfyEditor !== undefined && (
+                <NativeComfySettingsModal
+                    open
+                    initial={nativeComfyEditor}
+                    onClose={() => setNativeComfyEditor(undefined)}
+                    onSave={async (channel) => {
+                        await saveService(channel, "ComfyUI 渠道已保存，可在创作页选择工作流");
+                        setNativeComfyEditor(undefined);
+                    }}
+                />
+            )}
         </Form>
     );
 }
@@ -846,7 +873,12 @@ function channelConnectionSignature(channel: ModelChannel) {
 }
 
 function channelProtocolLabel(channel: ModelChannel) {
+    if (isNativeComfyChannel(channel)) return "原生 ComfyUI";
     return channelConnectionMode(channel) === "gemini" ? "Gemini 原生" : "OpenAI 兼容";
+}
+
+function isNativeComfyChannel(channel: Pick<ModelChannel, "modelProfiles">) {
+    return channel.modelProfiles?.some((profile) => isNativeComfyProtocol(profile.protocol) || Boolean(profile.comfyui)) === true;
 }
 
 function isKnownDefaultBaseUrl(value: string) {

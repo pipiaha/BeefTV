@@ -503,6 +503,8 @@ export function backendProviderConfig(config: AiConfig, mode: BackendGenerationM
         secretKey: requestConfig.credentialRef ? "" : requestConfig.secretKey,
         headers: requestConfig.headers,
         credentialRef: requestConfig.credentialRef,
+        authType: requestConfig.authType,
+        comfyui: requestConfig.comfyui,
         model: requestConfig.model,
         ...generationOptions,
         capabilityConfig: modelCapabilityConfigFor(config, requestConfig.model),

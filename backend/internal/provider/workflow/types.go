@@ -33,6 +33,21 @@ type Config struct {
 	WorkflowJSON          map[string]interface{}
 	WorkflowFields        []Field
 	RunningHubUploadKey   string
+	AuthType              string
+	AuthHeader            string
+	NegativePrompt        string
+	Seed                  string
+	ComfyUI               *ComfyWorkflow
+}
+
+// ComfyWorkflow is the persisted native ComfyUI API-graph contract. It is
+// intentionally separate from RunningHub's workflow identity fields.
+type ComfyWorkflow struct {
+	ReleaseModelsAfter bool           `json:"releaseModelsAfter,omitempty"`
+	Graph              map[string]any `json:"graph"`
+	Fields             []Field        `json:"fields"`
+	OutputNodeID       string         `json:"outputNodeId"`
+	OutputField        string         `json:"outputField"`
 }
 
 // Media is the workflow-needed slice of providerMedia.
@@ -56,6 +71,7 @@ type Input struct {
 	Mask             *Media
 	ResumedRequestID string
 	LocalWorkspace   bool
+	ClientID         string
 }
 
 // FetchRequest is the exported workflow-settings fetch contract.
@@ -84,7 +100,18 @@ func IsRunningHubInterface(value string) bool {
 
 // IsProviderInterface reports whether the interface is a workflow provider.
 func IsProviderInterface(value string) bool {
-	return IsRunningHubInterface(value)
+	return IsRunningHubInterface(value) || IsNativeComfyInterface(value)
+}
+
+func IsNativeComfyInterface(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(model.ChannelInterfaceNativeComfyImage),
+		string(model.ChannelInterfaceNativeComfyVideo),
+		string(model.ChannelInterfaceNativeComfyAudio):
+		return true
+	default:
+		return false
+	}
 }
 
 func isRunningHubInterface(value string) bool {
@@ -108,13 +135,26 @@ func workflowInterfaceSupportsMode(interfaceType string, mode string) bool {
 	}
 }
 
+func nativeComfyInterfaceSupportsMode(interfaceType string, mode string) bool {
+	switch mode {
+	case "image":
+		return interfaceType == string(model.ChannelInterfaceNativeComfyImage)
+	case "video":
+		return interfaceType == string(model.ChannelInterfaceNativeComfyVideo)
+	case "audio":
+		return interfaceType == string(model.ChannelInterfaceNativeComfyAudio)
+	default:
+		return false
+	}
+}
+
 // ValidateConfig checks mode, interface, API key, outbound URL, and workflow identity.
 func ValidateConfig(mode string, config Config) error {
 	if mode != "image" && mode != "video" && mode != "audio" {
 		return errf("工作流协议暂不支持%s生成", mode)
 	}
 	interfaceType := strings.ToLower(strings.TrimSpace(config.InterfaceType))
-	if !workflowInterfaceSupportsMode(interfaceType, mode) {
+	if !workflowInterfaceSupportsMode(interfaceType, mode) && !nativeComfyInterfaceSupportsMode(interfaceType, mode) {
 		return errf("接口类型 %s 不支持%s生成", config.InterfaceType, mode)
 	}
 	if isRunningHubInterface(config.InterfaceType) {
@@ -128,6 +168,9 @@ func ValidateConfig(mode string, config Config) error {
 			return errText("RunningHub 缺少 workflowId 或 webappId")
 		}
 		return nil
+	}
+	if IsNativeComfyInterface(config.InterfaceType) {
+		return validateNativeComfyConfig(mode, config)
 	}
 	return errText("未知工作流协议")
 }

@@ -225,7 +225,7 @@ func TestTimelineRenderReplaysRecoveredIdentityWithoutFFmpeg(t *testing.T) {
 	payload := []byte("recovered-render-bytes")
 	resource, err := svc.resourceDomain().RecoverOwned(task.UserID, timelineRenderArtifactIdentity(task.ID), func() (localasset.RecoveredArtifact, error) {
 		return localasset.RecoveredArtifact{
-			Kind: "video", FileName: timelineRenderFileName, MimeType: "video/mp4",
+			Kind: "video", FileName: "timeline-render.mp4", MimeType: "video/mp4",
 			Size: int64(len(payload)), Width: 320, Height: 180, DurationMs: 2000,
 			Body: bytes.NewReader(payload),
 		}, nil
@@ -250,7 +250,7 @@ func TestTimelineRenderReplaysRecoveredIdentityWithoutFFmpeg(t *testing.T) {
 	if err := json.Unmarshal([]byte(stored.ResultJSON), &result); err != nil {
 		t.Fatalf("result: %v", err)
 	}
-	if result.ResourceID != resource.ID || result.FileName != timelineRenderFileName {
+	if result.ResourceID != resource.ID || result.FileName != "timeline-render.mp4" {
 		t.Fatalf("result=%+v want resource %s", result, resource.ID)
 	}
 }

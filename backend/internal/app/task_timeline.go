@@ -161,6 +161,10 @@ type TimelineRenderPlanRequest struct {
 
 type timelineRenderResult struct {
 	Video       map[string]any `json:"video,omitempty"`
+	Audio       map[string]any `json:"audio,omitempty"`
+	Image       map[string]any `json:"image,omitempty"`
+	Kind        string         `json:"kind"`
+	MimeType    string         `json:"mimeType"`
 	ResourceID  string         `json:"resourceId"`
 	FileName    string         `json:"fileName"`
 	Size        int64          `json:"size"`

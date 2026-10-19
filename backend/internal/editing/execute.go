@@ -13,14 +13,14 @@ import (
 )
 
 const (
-	renderOutputName     = "render-output.mp4"
 	ffmpegLogTailMax     = 64 << 10
 	ffmpegErrorTailBytes = 400
 )
 
 // Renderer executes a compiled semantic plan with native ffmpeg.
 // It materializes opaque sources, probes tracks, lowers the plan, and writes
-// one bounded MP4. It does not compile a second plan or persist workspace resources.
+// one bounded media artifact. It does not compile a second plan or persist
+// workspace resources.
 type Renderer struct {
 	Sources SourceOpener
 	FFmpeg  string
@@ -30,6 +30,9 @@ type Renderer struct {
 type RenderedOutput struct {
 	Path        string
 	Size        int64
+	Kind        string
+	MimeType    string
+	FileName    string
 	Width       int
 	Height      int
 	DurationMs  int64
@@ -56,6 +59,10 @@ func reportProgress(progress Progress, stage string, percent int) error {
 func (r *Renderer) Render(ctx context.Context, plan *Plan, progress Progress) (RenderedOutput, func(), error) {
 	if plan == nil || !plan.HasMedia() {
 		return RenderedOutput{}, nil, ErrNoMedia
+	}
+	if plan.Output.Output == "" && plan.Output.Format == "" {
+		plan.Output.Output = OutputVideo
+		plan.Output.Format = FormatMP4
 	}
 	ffmpegBin, err := r.ffmpegBinary()
 	if err != nil {
@@ -85,12 +92,16 @@ func (r *Renderer) Render(ctx context.Context, plan *Plan, progress Progress) (R
 	if err := ApplySourceFacts(plan, facts); err != nil {
 		return fail(err)
 	}
-	if plan.SubtitleSRT != "" {
+	artifactKind, artifactName, artifactMIME, err := RenderArtifact(plan.Output)
+	if err != nil {
+		return fail(err)
+	}
+	if plan.Output.Output == OutputVideo && plan.SubtitleSRT != "" {
 		if err := os.WriteFile(filepath.Join(workDir, SubtitleFileName), []byte(plan.SubtitleSRT), 0600); err != nil {
 			return fail(fmt.Errorf("写入字幕文件失败"))
 		}
 	}
-	target := filepath.Join(workDir, renderOutputName)
+	target := filepath.Join(workDir, artifactName)
 	args := BuildFFmpegArgs(*plan, files, target)
 	if len(args) == 0 {
 		return fail(fmt.Errorf("无法生成渲染命令"))
@@ -113,21 +124,34 @@ func (r *Renderer) Render(ctx context.Context, plan *Plan, progress Progress) (R
 	if err != nil {
 		return fail(err)
 	}
-	width, height := plan.Output.Width, plan.Output.Height
-	if width <= 0 {
-		width = DefaultWidth
-	}
-	if height <= 0 {
-		height = DefaultHeight
+	width, height := 0, 0
+	if plan.Output.Output != OutputAudio {
+		width, height = plan.Output.Width, plan.Output.Height
+		if width <= 0 {
+			width = DefaultWidth
+		}
+		if height <= 0 {
+			height = DefaultHeight
+		}
 	}
 	return RenderedOutput{
 		Path:        target,
 		Size:        size,
+		Kind:        artifactKind,
+		MimeType:    artifactMIME,
+		FileName:    artifactName,
 		Width:       width,
 		Height:      height,
-		DurationMs:  outputFacts.DurationMs,
+		DurationMs:  outputDuration(plan.Output, outputFacts),
 		SubtitleSRT: plan.SubtitleSRT,
 	}, cleanup, nil
+}
+
+func outputDuration(output Output, facts SourceFacts) int64 {
+	if output.Output == OutputImage {
+		return 0
+	}
+	return facts.DurationMs
 }
 
 func verifyRenderedOutput(ctx context.Context, path string, plan *Plan) (SourceFacts, int64, error) {
@@ -142,17 +166,39 @@ func verifyRenderedOutput(ctx context.Context, path string, plan *Plan) (SourceF
 	if err != nil {
 		return SourceFacts{}, 0, fmt.Errorf("渲染产物不是有效媒体")
 	}
-	if !facts.HasVideo {
-		return SourceFacts{}, 0, fmt.Errorf("渲染产物缺少视频轨")
+	if plan == nil {
+		return SourceFacts{}, 0, fmt.Errorf("渲染产物缺少导出计划")
 	}
-	if !facts.HasAudio {
-		return SourceFacts{}, 0, fmt.Errorf("渲染产物缺少音频轨")
-	}
-	if facts.DurationMs <= 0 {
-		return SourceFacts{}, 0, fmt.Errorf("渲染产物时长无效")
-	}
-	if plan != nil && !outputDurationWithinPlan(plan.DurationMs, facts.DurationMs, plan.Output.FPS) {
-		return SourceFacts{}, 0, fmt.Errorf("渲染产物时长无效")
+	switch plan.Output.Output {
+	case OutputVideo:
+		if !facts.HasVideo {
+			return SourceFacts{}, 0, fmt.Errorf("渲染产物缺少视频轨")
+		}
+		if !facts.HasAudio {
+			return SourceFacts{}, 0, fmt.Errorf("渲染产物缺少音频轨")
+		}
+		if facts.DurationMs <= 0 || !outputDurationWithinPlan(plan.DurationMs, facts.DurationMs, plan.Output.FPS) {
+			return SourceFacts{}, 0, fmt.Errorf("渲染产物时长无效")
+		}
+	case OutputAudio:
+		if !facts.HasAudio {
+			return SourceFacts{}, 0, fmt.Errorf("渲染产物缺少音频轨")
+		}
+		if facts.HasVideo {
+			return SourceFacts{}, 0, fmt.Errorf("音频导出不应对应视频轨")
+		}
+		if facts.DurationMs <= 0 || !outputDurationWithinPlan(plan.DurationMs, facts.DurationMs, plan.Output.FPS) {
+			return SourceFacts{}, 0, fmt.Errorf("渲染产物时长无效")
+		}
+	case OutputImage:
+		if !facts.HasVideo {
+			return SourceFacts{}, 0, fmt.Errorf("渲染产物缺少图片轨")
+		}
+		if facts.HasAudio {
+			return SourceFacts{}, 0, fmt.Errorf("图片导出不应对应音频轨")
+		}
+	default:
+		return SourceFacts{}, 0, fmt.Errorf("渲染产物缺少有效导出类型")
 	}
 	return facts, stat.Size(), nil
 }
