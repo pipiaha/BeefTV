@@ -28,6 +28,7 @@
   <a href="#产品演示">产品演示</a> ·
   <a href="docs/content/docs/overview/features.mdx">功能清单</a> ·
   <a href="QUICKSTART.md">开始使用</a> ·
+  <a href="docs/agent-onboarding.md">Agent 接入</a> ·
   <a href="CONTRIBUTING.md">参与贡献</a>
 </p>
 
@@ -74,15 +75,23 @@ AI Native 自由画布
 
 ## 开始使用
 
+本 fork 的原生 ComfyUI 和外部 Agent 接入改动位于 `codex/comfyui-native-media` 分支，使用该分支构建。页面上的上游桌面下载不包含本 fork 新增功能。
+
 下载桌面版及 Mac 首次打开说明见 [快速开始](QUICKSTART.md#下载与首次打开)。
 
 ```bash
-git clone https://github.com/glanderness/BeefTV.git
+git clone --branch codex/comfyui-native-media https://github.com/pipiaha/BeefTV.git
 cd BeefTV
 ./scripts/build-beeftv-release.sh
 ```
 
 详细环境要求、Windows 构建与本地开发方式见 [`QUICKSTART.md`](QUICKSTART.md) 和[桌面发布文档](docs/desktop-release.md)。首次启动后，添加自己的模型渠道即可开始创作。
+
+## 外部 Agent 接入
+
+在工作台「BeefTV MCP」页面为客户端生成连接配置，加载后首先调用 `beeftv_get_started`。MCP 握手会提示这个入口，工具会返回操作指南、实时画布和当前启用的原生工作流；Agent 无需继承历史聊天或额外获取本地接入包。
+
+完整步骤见[外部 Agent 接入](docs/agent-onboarding.md)。操作指南与程序一同托管在[仓库](backend/cmd/beeftv/agent-guide.md)，并编译进 MCP 服务。首次安装仍需用户授权客户端连接；支持标准 MCP stdio 且能运行本机服务的 Agent 均使用同一入口。
 
 ## 贡献与许可
 

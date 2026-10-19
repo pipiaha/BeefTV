@@ -13,6 +13,7 @@ import { agentClientDisplayLabel, agentClientKindLabel, agentClientKinds, agentC
 import { AgentConnectPanel } from "./agent-connect-panel";
 
 const AGENT_CLIENTS_QUERY_KEY = ["agent-clients"] as const;
+const AGENT_START_PROMPT = "连接 BeefTV，先调用 beeftv_get_started，读取操作指南、当前画布和可用工作流，再按我的需求推进；将素材、结果和评审记录回填到工作台。";
 
 export default function AgentsPage() {
     const { message } = App.useApp();
@@ -55,6 +56,13 @@ export default function AgentsPage() {
                 <EmptyState icon={Plug} title="当前版本还不支持" description="更新到新版本后就能在这里连接 Codex、Claude Code 和 Cursor。" />
             ) : (
                 <div className="agents-settings mt-4 pb-6">
+                    <section aria-label="Agent 接入步骤" className="mb-5 space-y-3 px-5">
+                        <p className="text-sm leading-6">选择下面的客户端，生成并加载连接配置。连接后，Agent 会收到首次使用提示，并可通过 beeftv_get_started 取得完整操作指南和当前工作区。</p>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <p className="min-w-0 flex-1 text-xs leading-5 text-foreground/60">{AGENT_START_PROMPT}</p>
+                            <Button size="small" onClick={() => copyText(AGENT_START_PROMPT)}>复制给 Agent 的启动指令</Button>
+                        </div>
+                    </section>
                     {clientsQuery.isPending ? <p className="text-xs text-foreground/55">正在读取…</p> : null}
                     {clientsQuery.error ? <div role="alert" className="mb-4 text-sm">无法读取连接状态。<Button type="link" onClick={() => void clientsQuery.refetch()}>重试</Button></div> : null}
                     <div className="agent-tool-list">

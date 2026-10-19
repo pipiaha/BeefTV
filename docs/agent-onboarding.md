@@ -2,6 +2,16 @@
 
 外部 Agent 的日常创作入口统一使用标准 MCP stdio。CLI 是同一个 MCP 服务的启动程序，也用于诊断维护；HTTP API 是底层业务接口。Agent 不需要了解源码或先前聊天记录。
 
+## 说明如何被发现
+
+| Agent 接触到的入口 | 如何找到说明 |
+| --- | --- |
+| 仓库 | README 的「Agent 接入」链接和根 AGENTS.md 指向本文；完整操作指南随源码托管 |
+| 已安装的工作台 | 「BeefTV MCP」页面生成连接配置，并提供可复制给 Agent 的启动指令 |
+| 已加载的 MCP 服务 | initialize 的 instructions 提示先调用 beeftv_get_started；tools/list 的工具说明重复提示，调用后返回完整指南与实时工作区 |
+
+首次连接仍需用户将已授权配置加载到 Agent 客户端，未连接的 Agent 不会凭空发现本机工作区。完成这一步后，操作知识由 MCP 服务提供，不依赖某位 Agent 的记忆。源码维护入口是本文和 [agent-guide.md](../backend/cmd/beeftv/agent-guide.md)；部署时的配置文件含本机路径与独立客户端凭据，留在本机，不提交仓库。
+
 ## 一次性连接
 
 1. 启动 BeefTV，保持后端运行。浏览器用于查看和参与业务；内置聊天模型无需配置。
