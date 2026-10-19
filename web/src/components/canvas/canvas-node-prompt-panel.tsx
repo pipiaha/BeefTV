@@ -729,6 +729,13 @@ function ConnectedReferenceShelf({
     return (
         <>
             <div className="canvas-node-composer-references" role="group" aria-label="已连接素材">
+                <span
+                    className="canvas-node-composer-references-count"
+                    aria-label={`参考图 ${activeReferences.length}/16`}
+                    style={{ fontSize: 11, fontVariantNumeric: "tabular-nums", lineHeight: "20px", paddingLeft: 4, paddingRight: 6, alignSelf: "center", flex: "0 0 auto", opacity: 0.85, color: activeReferences.length >= 12 ? "var(--status-warning-text, #d97706)" : undefined }}
+                >
+                    {activeReferences.length}/16
+                </span>
                 <div className="canvas-node-composer-references-track thin-scrollbar">
                     {activeReferences.map((reference, index) => {
                         const displayName = canvasResourceDisplayName(reference);
