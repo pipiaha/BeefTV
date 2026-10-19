@@ -44,6 +44,7 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
     const endpoint = item.supportedEndpointTypes?.map((value) => endpoints[value.trim().toLowerCase()]).find((id) => protocols.some((p) => p.value === id && p.capability === capability && p.enabled !== false));
     const inherited = protocols.find((p) => p.value === channel.interfaceType && p.capability === capability && p.enabled !== false)?.value;
     let proposed = inherited || endpoint || candidates[preset][capability];
+    if (capability === "audio" && existing?.audioUses && !existing.audioUses.includes("speech") && proposed === "openai-audio" && !inherited && !endpoint) proposed = undefined;
     // Model names identify a family, not a provider's wire protocol. Ask the
     // user to select its contract unless the catalog explicitly declares it.
     if (fullvideoFull && capability === "video" && !inherited) proposed = item.supportedEndpointTypes?.includes("full-video") ? "full-video" : undefined;

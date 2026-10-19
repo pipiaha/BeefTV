@@ -17,6 +17,7 @@ BeefTV 是一个本地优先、轻量、AI Native 的视频工作台。本页只
 
 - [本地工作区数据源](local-workspace-data-sources.md)
 - [模型配置持久化](local-model-config-persistence.md)
+- [模型设置与 ComfyUI 配置](model-settings.md)
 - [桌面账号与钱包](content/docs/backend/desktop-account.mdx)
 - [模型服务商验证](model-provider-validation.md)
 - [Midjourney 固定四张输出与恢复](refactor/midjourney-fixed-output-20261017.md)

@@ -1,17 +1,31 @@
 import { Alert, App, Button, Form, Input, Popconfirm, Segmented, Select } from "antd";
 import { Bug, Pencil, Plus, RefreshCw, Trash2, Workflow } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { ModelEditorModal } from "@/components/model-editor-modal";
 import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/channel-headers-editor";
 import { WorkspaceState } from "@/components/layout/workspace-state";
-import { isNativeComfyProtocol } from "@/lib/native-comfyui";
+import { type NativeComfyCapability } from "@/lib/native-comfyui";
+import { isNativeComfyChannel, MODEL_USAGE_LABELS, MODEL_USAGE_ORDER, modelsForUsage, modelUsageCapability, type ModelUsage } from "@/lib/model-settings-catalog";
+import "./model-settings.css";
 import { PageHeader } from "@/components/layout/workspace-page";
 import { mergeFetchedChannelModelProfiles } from "@/lib/channel-model-catalog";
 import { seedancePortraitModel } from "@/lib/seedance-portrait";
 import { ensureModelProfilesWithUiDefaults } from "@/lib/model-protocols";
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image";
-import { channelHasGenerationCredential, channelHasManagedBeefAPICredential, createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, isBuiltinBeefAPIChannel, modelOptionsFromChannels, normalizeConfigSnapshot, useConfigStore, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import {
+    channelHasGenerationCredential,
+    channelHasManagedBeefAPICredential,
+    createModelChannel,
+    defaultBaseUrlForApiFormat,
+    filterModelsByCapability,
+    isBuiltinBeefAPIChannel,
+    modelOptionsFromChannels,
+    normalizeConfigSnapshot,
+    useConfigStore,
+    type AiConfig,
+    type ModelChannel,
+} from "@/stores/use-config-store";
 import { ChannelModelSettings } from "./channel-model-settings";
 import { ModelServiceEditor } from "./model-service-editor";
 import { NativeComfySettingsModal } from "./native-comfy-settings-modal";
@@ -41,6 +55,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
     const replaceConfig = useConfigStore((state) => state.replaceConfig);
     const localMode = workspaceCapabilities().local;
     const persistence = useSyncExternalStore(subscribeModelConfigPersistence, getModelConfigPersistenceState, getModelConfigPersistenceState);
+    const [usage, setUsage] = useState<ModelUsage>("all");
     const [loadingChannelIds, setLoadingChannelIds] = useState<string[]>([]);
     const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
     const [newChannelId, setNewChannelId] = useState<string | null>(null);
@@ -76,9 +91,13 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
             const result = await getLocalModelConfig();
             if (catalogSync.current !== intent) return;
             const current = useConfigStore.getState().config;
-            replaceConfig(localWorkspaceConfig(normalizeConfigSnapshot({
-                config: mergeManagedBeefAPICatalog(current, result.config, intent.adopt && current.assistantModel === intent.selection),
-            }).config));
+            replaceConfig(
+                localWorkspaceConfig(
+                    normalizeConfigSnapshot({
+                        config: mergeManagedBeefAPICatalog(current, result.config, intent.adopt && current.assistantModel === intent.selection),
+                    }).config,
+                ),
+            );
             catalogSync.current = null;
             setCatalogSyncFailed(false);
         } catch {
@@ -104,10 +123,15 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
         let active = true;
         const timer = window.setInterval(() => {
             void getBeefAPIConnection()
-                .then((summary) => { if (active) void applyBeefConnection(summary, beefConnection?.state); })
+                .then((summary) => {
+                    if (active) void applyBeefConnection(summary, beefConnection?.state);
+                })
                 .catch(() => undefined);
         }, 2000);
-        return () => { active = false; window.clearInterval(timer); };
+        return () => {
+            active = false;
+            window.clearInterval(timer);
+        };
     }, [beefConnection?.state]);
 
     const runBeefAction = async (action: () => Promise<BeefAPIConnectionSummary>, fallback: string) => {
@@ -141,7 +165,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
     };
     const userChannels = config.channels.filter((channel) => channel.scope !== "system");
     const runningHubReady = Boolean(config.runningHub.enabled && config.runningHub.baseUrl.trim() && config.runningHub.apiKey.trim() && config.runningHub.workflowId.trim());
-    const nativeComfyChannels = userChannels.filter(isNativeComfyChannel);
+    const visibleChannels = userChannels.filter((channel) => usage === "all" || modelsForUsage(channel, usage).length > 0).sort((a, b) => Number(isNativeComfyChannel(b)) - Number(isNativeComfyChannel(a)));
 
     const updateChannels = (channels: ModelChannel[], baseConfig = config) => {
         replaceConfig(withChannels(baseConfig, channels));
@@ -153,11 +177,12 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
             config.channels.map((channel) => {
                 if (channel.id !== id) return channel;
                 const models = patch.models ? uniqueModels(patch.models) : channel.models;
-                const modelProfiles = patch.modelProfiles !== undefined
-                    ? patch.modelProfiles
-                    : patch.models && channel.scope !== "system"
-                        ? ensureModelProfilesWithUiDefaults(models, channel.modelProfiles, [], channel.apiFormat)
-                        : patch.models
+                const modelProfiles =
+                    patch.modelProfiles !== undefined
+                        ? patch.modelProfiles
+                        : patch.models && channel.scope !== "system"
+                          ? ensureModelProfilesWithUiDefaults(models, channel.modelProfiles, [], channel.apiFormat)
+                          : patch.models
                             ? channel.modelProfiles?.filter((item) => models.includes(item.model))
                             : channel.modelProfiles;
                 return {
@@ -185,9 +210,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
     const saveService = async (channel: ModelChannel, successMessage = "模型服务已保存，可在创作页选择模型") => {
         cancelCatalog(channel.id);
         const latest = useConfigStore.getState().config;
-        const channels = latest.channels.some((item) => item.id === channel.id)
-            ? latest.channels.map((item) => item.id === channel.id ? channel : item)
-            : [...latest.channels, channel];
+        const channels = latest.channels.some((item) => item.id === channel.id) ? latest.channels.map((item) => (item.id === channel.id ? channel : item)) : [...latest.channels, channel];
         updateChannels(channels, latest);
         await flushModelConfig();
         const saved = getModelConfigPersistenceState();
@@ -210,14 +233,21 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
         }
         deleting.current.add(id);
         cancelCatalog(id);
-        const next = withChannels(latest, latest.channels.filter((item) => item.id !== id));
+        const next = withChannels(
+            latest,
+            latest.channels.filter((item) => item.id !== id),
+        );
         replaceConfig(next);
         try {
             await commitModelConfig(next);
             await flushModelConfig();
             const saved = getModelConfigPersistenceState();
             if (saved.status === "error" || saved.dirty) throw new Error(saved.error || "删除尚未保存");
-            setDeleteFailures((items) => { const next = { ...items }; delete next[id]; return next; });
+            setDeleteFailures((items) => {
+                const next = { ...items };
+                delete next[id];
+                return next;
+            });
             recordChannelDelete({ scope: channel?.scope, before: latest.channels.length, after: next.channels.length });
             message.success("渠道已删除并保存");
         } catch (error) {
@@ -330,246 +360,288 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
 
     return (
         <Form layout="vertical" requiredMark={false}>
-            {Object.entries(deleteFailures).map(([id, detail]) => <Alert key={id} type="error" showIcon title={detail} action={<Button onClick={() => void deleteChannel(id)}>重试删除</Button>} />)}
+            {Object.entries(deleteFailures).map(([id, detail]) => (
+                <Alert key={id} type="error" showIcon title={detail} action={<Button onClick={() => void deleteChannel(id)}>重试删除</Button>} />
+            ))}
             <PageHeader
-                title={localMode ? "本地模型渠道" : "个人渠道"}
-                actions={(
-                    <div className="settings-pane-header-actions flex w-full gap-2 sm:w-auto sm:shrink-0">
-                    {onOpenDiagnostics ? <Button className="h-10 flex-1 sm:h-8 sm:flex-none" icon={<Bug className="size-4" />} onClick={onOpenDiagnostics}>问题诊断</Button> : null}
-                    <Button className="h-10 flex-1 sm:h-8 sm:flex-none" icon={<RefreshCw className="size-4" />} loading={loadingChannelIds.includes("all")} disabled={loadingChannelIds.some((id) => id !== "all")} onClick={() => void refreshAllModels()}>
-                        拉取全部渠道模型
-                    </Button>
-                    <Button type="primary" className="h-10 flex-1 sm:h-8 sm:flex-none" icon={<Plus className="size-4" />} onClick={addChannel}>
-                        添加模型服务
-                    </Button>
+                title="服务接入"
+                description="按用途管理生成能力，分别选择 API 或 ComfyUI 接入。"
+                actions={
+                    <div className="settings-pane-header-actions flex flex-wrap gap-2">
+                        {onOpenDiagnostics ? (
+                            <Button icon={<Bug className="size-4" />} onClick={onOpenDiagnostics}>
+                                问题诊断
+                            </Button>
+                        ) : null}
+                        <Button icon={<Plus className="size-4" />} onClick={addChannel}>添加 API 服务</Button>
+                        <Button type="primary" icon={<Plus className="size-4" />} onClick={() => setNativeComfyEditor(null)}>添加 ComfyUI</Button>
+                        {onOpenRunningHub && <Button onClick={onOpenRunningHub}>添加 RunningHub</Button>}
                     </div>
-                )}
+                }
             />
-            <section className="settings-section mb-3">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                        <h3 className="text-sm font-semibold">个人工作流渠道</h3>
-                        <p className="mt-1 text-xs text-foreground/55">为本机或局域网 ComfyUI 保存工作流；每个服务可以使用不同地址。</p>
-                    </div>
-                    <Button icon={<Plus className="size-4" />} onClick={() => setNativeComfyEditor(null)}>新增 ComfyUI 服务</Button>
+            <div className="model-settings-toolbar">
+                <div role="group" aria-label="按用途筛选服务" className="model-settings-usage">
+                    {MODEL_USAGE_ORDER.map((key) => (
+                        <button key={key} type="button" aria-pressed={usage === key} onClick={() => setUsage(key)}>
+                            {MODEL_USAGE_LABELS[key]}
+                            <span>{userChannels.filter(channel => key === "all" || modelsForUsage(channel, key).length > 0).length}</span>
+                        </button>
+                    ))}
                 </div>
-                <div className="grid gap-2 lg:grid-cols-2">
-                    {onOpenRunningHub ? (
-                        <WorkflowChannelEntry
-                            icon={<Workflow className="size-4" />}
-                            title="RunningHub"
-                            description="云端工作流和 RunningHub App"
-                            status={runningHubReady ? `${config.runningHub.workflows.length} 个工作流已配置` : config.runningHub.enabled ? "待完成连接和工作流配置" : "未启用"}
-                            ready={runningHubReady}
-                            onOpen={onOpenRunningHub}
-                        />
-                    ) : null}
-                    <WorkflowChannelEntry
-                        icon={<Workflow className="size-4" />}
-                        title="ComfyUI"
-                        description="原生 API 工作流模型"
-                        status={nativeComfyChannels.length ? `${nativeComfyChannels.reduce((count, channel) => count + (channel.modelProfiles?.filter((profile) => profile.comfyui).length || 0), 0)} 个已保存工作流` : "未配置"}
-                        ready={nativeComfyChannels.length > 0}
-                        onOpen={() => setNativeComfyEditor(nativeComfyChannels[0] || null)}
-                    />
-                </div>
-            </section>
-            {userChannels.length ? (
-                <div className="settings-channel-list space-y-2">
-                    {userChannels.map((channel) => {
+            </div>
+            {onOpenRunningHub && (
+                <WorkflowChannelEntry
+                    icon={<Workflow className="size-4" />}
+                    title="RunningHub"
+                    description="云端工作流和 RunningHub App"
+                    status={runningHubReady ? `${config.runningHub.workflows.length} 个工作流已配置` : "待配置"}
+                    ready={runningHubReady}
+                    onOpen={onOpenRunningHub}
+                />
+            )}
+            {visibleChannels.length ? (
+                <div className="settings-channel-list model-settings-services">
+                    {visibleChannels.map((channel, index) => {
                         const editing = editingChannelId === channel.id;
                         const builtinBeefAPI = isBuiltinBeefAPIChannel(channel);
                         const nativeComfy = isNativeComfyChannel(channel);
                         return (
-                            <section key={channel.id} data-onboarding={builtinBeefAPI ? "official-channel" : undefined} aria-labelledby={`channel-${channel.id}-title`} className="settings-channel p-2.5 sm:p-3">
-                                <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2.5">
-                                    <div className="min-w-0 flex-1 basis-52">
-                                        <h3 id={`channel-${channel.id}-title`} className="flex items-center gap-2 text-sm font-semibold">
-                                            {builtinBeefAPI ? <img src={beefTVAppIcon} alt="" className="size-5 shrink-0 object-contain" draggable={false} /> : nativeComfy ? <Workflow className="size-5 shrink-0" /> : <ModelLogo icon={MODEL_SERVICE_PRESETS.find((preset) => preset.id === servicePresetFor(channel))?.icon} size={20} />}
-                                            {builtinBeefAPI ? "BeefTV" : channel.name || "未命名渠道"}
-                                        </h3>
-                                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground/55">
-                                            {builtinBeefAPI ? (
-                                                <>
-                                                    <span>已保存 {channel.models.length} 个模型</span>
-                                                    <span>BeefTV 官方算力渠道，一键连接、开箱即用</span>
-                                                </>
-                                            ) : (
-                                                <span>{channelProtocolLabel(channel)} · 已保存 {channel.models.length} 个模型</span>
-                                            )}
-                                            <ChannelStatus channel={channel} persistence={persistence} connection={builtinBeefAPI ? beefConnection : null} />
+                            <Fragment key={channel.id}>
+                                {(index === 0 || isNativeComfyChannel(visibleChannels[index - 1]) !== nativeComfy) && (
+                                    <div className="model-settings-group-heading">
+                                        <div>
+                                            <h2>{nativeComfy ? "ComfyUI 工作流" : "API 模型服务"}</h2>
+                                            <p>{nativeComfy ? "连接现有服务，用工作流生成图片、视频和音频。" : "通过服务商接口调用模型，按模型设置请求协议与能力。"}</p>
                                         </div>
-                                        {!builtinBeefAPI && <p className="mt-1 break-all text-xs text-foreground/50">{nativeComfy ? `服务地址：${channel.baseUrl || "未配置"}` : `模型目录地址：${modelCatalogRequestURL(channel)}`}</p>}
+                                        {!nativeComfy && (
+                                            <Button size="small" type="text" icon={<RefreshCw size={13} />} loading={loadingChannelIds.includes("all")} disabled={loadingChannelIds.some((id) => id !== "all")} onClick={() => void refreshAllModels()}>
+                                                更新 API 模型目录
+                                            </Button>
+                                        )}
                                     </div>
-                                    <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto sm:shrink-0">
-                                        {builtinBeefAPI && catalogSyncFailed ? <Button loading={beefBusy} onClick={() => void runBeefAction(getBeefAPIConnection, "无法更新模型列表")}>重试更新模型列表</Button> : null}
-                                        {builtinBeefAPI ? (
-                                            <BeefAPIConnectionActions
-                                                connection={beefConnection}
-                                                busy={beefBusy}
-                                                onConnect={() => void runBeefAction(beginBeefConnection, "无法开始连接")}
-                                                onCancel={() => void runBeefAction(cancelBeefAPIConnection, "无法取消连接")}
-                                                onRetry={() => void runBeefAction(retryBeefConnection, "无法重新连接")}
-                                                onDisconnect={() => void runBeefAction(disconnectBeefAPIConnection, "无法断开连接")}
-                                                onWallet={() => {
-                                                    void openBeefAPIWallet().catch((error) => message.error(error instanceof Error ? error.message : "无法打开 BeefTV 账户"));
-                                                }}
-                                            />
-                                        ) : null}
-                                        <Button
-                                            className="h-10 sm:h-8"
-                                            size="small"
-                                            icon={<RefreshCw className="size-3.5" />}
-                                            loading={loadingChannelIds.includes(channel.id)}
-                                            disabled={nativeComfy || loadingChannelIds.includes("all") || (builtinBeefAPI && beefConnection?.state !== "connected")}
-                                            onClick={() => void refreshChannelModels(channel)}
-                                        >
-                                            拉取模型
-                                        </Button>
-                                        <Button
-                                            size="small"
-                                            icon={<Pencil className="size-3.5" />}
-                                            onClick={() => {
-                                                cancelCatalog(channel.id);
-                                                if (nativeComfy) { setNativeComfyEditor(channel); return; }
-                                                if (!builtinBeefAPI) { setServiceEditor(channel); return; }
-                                                setNewChannelId(null);
-                                                setEditingChannelId(channel.id);
-                                            }}
-                                        >
-                                            编辑
-                                        </Button>
-                                        {!builtinBeefAPI ? (
-                                            <Popconfirm classNames={{ root: "model-channel-delete-confirm" }} title="删除个人模型渠道？" description="该渠道关联的模型选择会同时移除。" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onOpenChange={recordChannelDeleteConfirmOpen} onConfirm={() => deleteChannel(channel.id)}>
-                                                    <Button
-                                                        title="删除渠道"
-                                                        className="size-10 p-0 sm:size-8"
-                                                        aria-label={`删除渠道 ${channel.name || "未命名渠道"}`}
-                                                        size="small"
-                                                        type="text"
-                                                        danger
-                                                        icon={<Trash2 className="size-3.5" />}
-                                                    />
-                                            </Popconfirm>
-                                        ) : null}
-                                    </div>
-                                </div>
-                                {editing && (
-                                    <ModelEditorModal
-                                        open
-                                        title={channel.id === newChannelId ? "新增自定义渠道" : "编辑自定义渠道"}
-                                        subtitle={channel.name}
-                                        onClose={closeChannelEditor}
-                                        footer={
-                                            <div className="model-editor-footer">
-                                                <span className="text-xs text-foreground/50">{localMode ? "更改实时保存到本地工作区" : "更改实时保存到云端渠道配置"}</span>
-                                                <div className="model-editor-footer-actions">
-                                                    <Button loading={loadingChannelIds.includes(channel.id)} onClick={() => void refreshChannelModels(channel)}>
-                                                        拉取模型
-                                                    </Button>
-                                                    <Button onClick={closeChannelEditor}>完成</Button>
-                                                </div>
+                                )}
+                                <section data-onboarding={builtinBeefAPI ? "official-channel" : undefined} aria-labelledby={`channel-${channel.id}-title`} className="settings-channel p-2.5 sm:p-3">
+                                    <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2.5">
+                                        <div className="min-w-0 flex-1 basis-52">
+                                            <h3 id={`channel-${channel.id}-title`} className="flex items-center gap-2 text-sm font-semibold">
+                                                {builtinBeefAPI ? (
+                                                    <img src={beefTVAppIcon} alt="" className="size-5 shrink-0 object-contain" draggable={false} />
+                                                ) : nativeComfy ? (
+                                                    <Workflow className="size-5 shrink-0" />
+                                                ) : (
+                                                    <ModelLogo icon={MODEL_SERVICE_PRESETS.find((preset) => preset.id === servicePresetFor(channel))?.icon} size={20} />
+                                                )}
+                                                {builtinBeefAPI ? "BeefTV" : channel.name || "未命名渠道"}
+                                                <span className="model-settings-connection-kind">{builtinBeefAPI ? "官方 API" : nativeComfy ? "ComfyUI" : channelProtocolLabel(channel)}</span>
+                                            </h3>
+                                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground/55">
+                                                {builtinBeefAPI ? (
+                                                    <>
+                                                        <span>已保存 {channel.models.length} 个模型</span>
+                                                        <span>BeefTV 官方算力渠道，一键连接、开箱即用</span>
+                                                    </>
+                                                ) : (
+                                                    <span>
+                                                        {channel.models.length} 个{nativeComfy ? "工作流" : "模型"}
+                                                    </span>
+                                                )}
+                                                <ChannelStatus channel={channel} persistence={persistence} connection={builtinBeefAPI ? beefConnection : null} />
                                             </div>
-                                        }
-                                    >
-                                        <div className="model-editor-panel">
-                                            <section className="model-editor-section">
-                                                <div>
-                                                    <h2>连接信息</h2>
-                                                    <p className="mt-1 text-xs text-foreground/50">用于拉取模型目录并向当前渠道发起请求。</p>
-                                                </div>
-                                                <div className="model-editor-connection-fields grid gap-3 sm:grid-cols-2">
-                                                    <Form.Item label="渠道名称" htmlFor={`channel-${channel.id}-name`} className="mb-0 sm:col-span-1">
-                                                        <Input
-                                                            id={`channel-${channel.id}-name`}
-                                                            value={channel.name}
-                                                            disabled={builtinBeefAPI}
-                                                            placeholder="例如：我的 NewAPI"
-                                                            onChange={(event) => updateChannel(channel.id, { name: event.target.value })}
-                                                            onBlur={(event) => updateChannel(channel.id, { name: event.target.value.trim() || "未命名渠道" })}
-                                                        />
-                                                    </Form.Item>
-                                                    <Form.Item label="目录连接类型" className="mb-0 sm:col-span-1" extra={builtinBeefAPI ? "应用内置适配" : "仅影响模型目录拉取。"}>
-                                                        <Segmented<UserChannelConnection>
-                                                            block
-                                                            disabled={builtinBeefAPI}
-                                                            value={channelConnectionMode(channel)}
-                                                            options={[
-                                                                { label: "OpenAI", value: "openai" },
-                                                                { label: "Gemini", value: "gemini" },
-                                                            ]}
-                                                            onChange={(value) => updateChannelConnection(channel, value)}
-                                                        />
-                                                    </Form.Item>
-                                                    <Form.Item label="Base URL" htmlFor={`channel-${channel.id}-base-url`} className="mb-0 sm:col-span-1">
-                                                        <Input
-                                                            id={`channel-${channel.id}-base-url`}
-                                                            inputMode="url"
-                                                            value={channel.baseUrl}
-                                                            disabled={builtinBeefAPI}
-                                                            placeholder={localMode ? "填写本地服务 Base URL" : "填写云端渠道 Base URL"}
-                                                            onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })}
-                                                            onBlur={(event) => updateChannel(channel.id, { baseUrl: event.target.value.trim().replace(/\/+$/u, "") })}
-                                                        />
-                                                    </Form.Item>
-                                                    {builtinBeefAPI ? (
-                                                        <Form.Item label="账号连接" className="mb-0 sm:col-span-2">
-                                                            <p className="m-0 text-sm leading-6 text-foreground/80">{beefAPIConnectionLabel(beefConnection)}</p>
-                                                            {beefConnection?.balance === "zero" ? <p className="mt-1 text-xs leading-5 text-foreground/55">余额为 0 时仍可查看模型。生成时会提示余额不足。</p> : null}
-                                                        </Form.Item>
-                                                    ) : (
-                                                        <>
-                                                            <Form.Item label="API Key" htmlFor={`channel-${channel.id}-api-key`} className="mb-0 sm:col-span-1">
-                                                                <Input.Password
-                                                                    id={`channel-${channel.id}-api-key`}
-                                                                    autoComplete="new-password"
-                                                                    value={channel.apiKey}
-                                                                    placeholder={channel.apiFormat === "gemini" ? "填写 Gemini API Key" : "填写当前渠道 API Key"}
-                                                                    onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })}
-                                                                    onBlur={(event) => updateChannel(channel.id, { apiKey: event.target.value.trim() })}
-                                                                />
-                                                            </Form.Item>
-                                                            <Form.Item label="Secret Key（可选）" htmlFor={`channel-${channel.id}-secret-key`} className="mb-0 sm:col-span-1" extra="即梦等 AK/SK 协议需要；其他协议留空。">
-                                                                <Input.Password
-                                                                    id={`channel-${channel.id}-secret-key`}
-                                                                    autoComplete="new-password"
-                                                                    value={channel.secretKey || ""}
-                                                                    placeholder="填写 Secret Key"
-                                                                    onChange={(event) => updateChannel(channel.id, { secretKey: event.target.value })}
-                                                                    onBlur={(event) => updateChannel(channel.id, { secretKey: event.target.value.trim() })}
-                                                                />
-                                                            </Form.Item>
-                                                        </>
-                                                    )}
-                                                    <div className="sm:col-span-2">
-                                                        <ChannelHeadersEditor value={channel.headers} onChange={(headers) => updateChannel(channel.id, { headers })} />
+                                            <div className="model-settings-capabilities">
+                                                {MODEL_USAGE_ORDER.filter(usage => usage !== "all").map((capability) => {
+                                                    const names = modelsForUsage(channel, capability);
+                                                    return names.length ? (
+                                                        <span key={capability} title={names.join("、")}>
+                                                            {MODEL_USAGE_LABELS[capability]} · {names.length}
+                                                        </span>
+                                                    ) : null;
+                                                })}
+                                            </div>
+                                            {!builtinBeefAPI && <p className="mt-1 break-all text-xs text-foreground/50">{nativeComfy ? `服务地址：${channel.baseUrl || "未配置"}` : `模型目录地址：${modelCatalogRequestURL(channel)}`}</p>}
+                                        </div>
+                                        <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto sm:shrink-0">
+                                            {builtinBeefAPI && catalogSyncFailed ? (
+                                                <Button loading={beefBusy} onClick={() => void runBeefAction(getBeefAPIConnection, "无法更新模型列表")}>
+                                                    重试更新模型列表
+                                                </Button>
+                                            ) : null}
+                                            {builtinBeefAPI ? (
+                                                <BeefAPIConnectionActions
+                                                    connection={beefConnection}
+                                                    busy={beefBusy}
+                                                    onConnect={() => void runBeefAction(beginBeefConnection, "无法开始连接")}
+                                                    onCancel={() => void runBeefAction(cancelBeefAPIConnection, "无法取消连接")}
+                                                    onRetry={() => void runBeefAction(retryBeefConnection, "无法重新连接")}
+                                                    onDisconnect={() => void runBeefAction(disconnectBeefAPIConnection, "无法断开连接")}
+                                                    onWallet={() => {
+                                                        void openBeefAPIWallet().catch((error) => message.error(error instanceof Error ? error.message : "无法打开 BeefTV 账户"));
+                                                    }}
+                                                />
+                                            ) : null}
+                                            {!nativeComfy && (
+                                                <Button
+                                                    className="h-10 sm:h-8"
+                                                    size="small"
+                                                    icon={<RefreshCw className="size-3.5" />}
+                                                    loading={loadingChannelIds.includes(channel.id)}
+                                                    disabled={nativeComfy || loadingChannelIds.includes("all") || (builtinBeefAPI && beefConnection?.state !== "connected")}
+                                                    onClick={() => void refreshChannelModels(channel)}
+                                                >
+                                                    拉取模型
+                                                </Button>
+                                            )}
+                                            <Button
+                                                size="small"
+                                                icon={<Pencil className="size-3.5" />}
+                                                onClick={() => {
+                                                    cancelCatalog(channel.id);
+                                                    if (nativeComfy) {
+                                                        setNativeComfyEditor(channel);
+                                                        return;
+                                                    }
+                                                    if (!builtinBeefAPI) {
+                                                        setServiceEditor(channel);
+                                                        return;
+                                                    }
+                                                    setNewChannelId(null);
+                                                    setEditingChannelId(channel.id);
+                                                }}
+                                            >
+                                                {nativeComfy ? "管理工作流" : "管理服务"}
+                                            </Button>
+                                            {!builtinBeefAPI ? (
+                                                <Popconfirm
+                                                    classNames={{ root: "model-channel-delete-confirm" }}
+                                                    title="删除个人模型渠道？"
+                                                    description="该渠道关联的模型选择会同时移除。"
+                                                    okText="删除"
+                                                    cancelText="取消"
+                                                    okButtonProps={{ danger: true }}
+                                                    onOpenChange={recordChannelDeleteConfirmOpen}
+                                                    onConfirm={() => deleteChannel(channel.id)}
+                                                >
+                                                    <Button title="删除渠道" className="size-10 p-0 sm:size-8" aria-label={`删除渠道 ${channel.name || "未命名渠道"}`} size="small" type="text" danger icon={<Trash2 className="size-3.5" />} />
+                                                </Popconfirm>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                    {editing && (
+                                        <ModelEditorModal
+                                            open
+                                            title={channel.id === newChannelId ? "新增自定义渠道" : "编辑自定义渠道"}
+                                            subtitle={channel.name}
+                                            onClose={closeChannelEditor}
+                                            footer={
+                                                <div className="model-editor-footer">
+                                                    <span className="text-xs text-foreground/50">{localMode ? "更改实时保存到本地工作区" : "更改实时保存到云端渠道配置"}</span>
+                                                    <div className="model-editor-footer-actions">
+                                                        <Button loading={loadingChannelIds.includes(channel.id)} onClick={() => void refreshChannelModels(channel)}>
+                                                            拉取模型
+                                                        </Button>
+                                                        <Button onClick={closeChannelEditor}>完成</Button>
                                                     </div>
                                                 </div>
-                                            </section>
-                                            <section className="model-editor-section">
-                                                <div>
-                                                    <h2>模型与能力</h2>
-                                                    <p className="mt-1 text-xs text-foreground/50">维护渠道模型，并在单个模型中配置调用协议、能力和定价。</p>
-                                                </div>
-                                                <Form.Item label="模型列表" htmlFor={`channel-${channel.id}-models`} className="mb-0">
-                                                    <Select
-                                                        id={`channel-${channel.id}-models`}
-                                                        mode="tags"
-                                                        showSearch
-                                                        allowClear
-                                                        maxTagCount="responsive"
-                                                        tokenSeparators={[",", "\n"]}
-                                                        placeholder="输入模型名，或点击拉取模型"
-                                                        value={channel.models}
-                                                        onChange={(models) => updateChannel(channel.id, { models: uniqueModels(models) })}
-                                                    />
-                                                </Form.Item>
-                                                <ChannelModelSettings channel={channel} onChange={(modelProfiles) => updateChannel(channel.id, { modelProfiles })} />
-                                            </section>
-                                        </div>
-                                    </ModelEditorModal>
-                                )}
-                            </section>
+                                            }
+                                        >
+                                            <div className="model-editor-panel">
+                                                <section className="model-editor-section">
+                                                    <div>
+                                                        <h2>连接信息</h2>
+                                                        <p className="mt-1 text-xs text-foreground/50">用于拉取模型目录并向当前渠道发起请求。</p>
+                                                    </div>
+                                                    <div className="model-editor-connection-fields grid gap-3 sm:grid-cols-2">
+                                                        <Form.Item label="渠道名称" htmlFor={`channel-${channel.id}-name`} className="mb-0 sm:col-span-1">
+                                                            <Input
+                                                                id={`channel-${channel.id}-name`}
+                                                                value={channel.name}
+                                                                disabled={builtinBeefAPI}
+                                                                placeholder="例如：我的 NewAPI"
+                                                                onChange={(event) => updateChannel(channel.id, { name: event.target.value })}
+                                                                onBlur={(event) => updateChannel(channel.id, { name: event.target.value.trim() || "未命名渠道" })}
+                                                            />
+                                                        </Form.Item>
+                                                        <Form.Item label="目录连接类型" className="mb-0 sm:col-span-1" extra={builtinBeefAPI ? "应用内置适配" : "仅影响模型目录拉取。"}>
+                                                            <Segmented<UserChannelConnection>
+                                                                block
+                                                                disabled={builtinBeefAPI}
+                                                                value={channelConnectionMode(channel)}
+                                                                options={[
+                                                                    { label: "OpenAI", value: "openai" },
+                                                                    { label: "Gemini", value: "gemini" },
+                                                                ]}
+                                                                onChange={(value) => updateChannelConnection(channel, value)}
+                                                            />
+                                                        </Form.Item>
+                                                        <Form.Item label="Base URL" htmlFor={`channel-${channel.id}-base-url`} className="mb-0 sm:col-span-1">
+                                                            <Input
+                                                                id={`channel-${channel.id}-base-url`}
+                                                                inputMode="url"
+                                                                value={channel.baseUrl}
+                                                                disabled={builtinBeefAPI}
+                                                                placeholder={localMode ? "填写本地服务 Base URL" : "填写云端渠道 Base URL"}
+                                                                onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })}
+                                                                onBlur={(event) => updateChannel(channel.id, { baseUrl: event.target.value.trim().replace(/\/+$/u, "") })}
+                                                            />
+                                                        </Form.Item>
+                                                        {builtinBeefAPI ? (
+                                                            <Form.Item label="账号连接" className="mb-0 sm:col-span-2">
+                                                                <p className="m-0 text-sm leading-6 text-foreground/80">{beefAPIConnectionLabel(beefConnection)}</p>
+                                                                {beefConnection?.balance === "zero" ? <p className="mt-1 text-xs leading-5 text-foreground/55">余额为 0 时仍可查看模型。生成时会提示余额不足。</p> : null}
+                                                            </Form.Item>
+                                                        ) : (
+                                                            <>
+                                                                <Form.Item label="API Key" htmlFor={`channel-${channel.id}-api-key`} className="mb-0 sm:col-span-1">
+                                                                    <Input.Password
+                                                                        id={`channel-${channel.id}-api-key`}
+                                                                        autoComplete="new-password"
+                                                                        value={channel.apiKey}
+                                                                        placeholder={channel.apiFormat === "gemini" ? "填写 Gemini API Key" : "填写当前渠道 API Key"}
+                                                                        onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })}
+                                                                        onBlur={(event) => updateChannel(channel.id, { apiKey: event.target.value.trim() })}
+                                                                    />
+                                                                </Form.Item>
+                                                                <Form.Item label="Secret Key（可选）" htmlFor={`channel-${channel.id}-secret-key`} className="mb-0 sm:col-span-1" extra="即梦等 AK/SK 协议需要；其他协议留空。">
+                                                                    <Input.Password
+                                                                        id={`channel-${channel.id}-secret-key`}
+                                                                        autoComplete="new-password"
+                                                                        value={channel.secretKey || ""}
+                                                                        placeholder="填写 Secret Key"
+                                                                        onChange={(event) => updateChannel(channel.id, { secretKey: event.target.value })}
+                                                                        onBlur={(event) => updateChannel(channel.id, { secretKey: event.target.value.trim() })}
+                                                                    />
+                                                                </Form.Item>
+                                                            </>
+                                                        )}
+                                                        <div className="sm:col-span-2">
+                                                            <ChannelHeadersEditor value={channel.headers} onChange={(headers) => updateChannel(channel.id, { headers })} />
+                                                        </div>
+                                                    </div>
+                                                </section>
+                                                <section className="model-editor-section">
+                                                    <div>
+                                                        <h2>模型与能力</h2>
+                                                        <p className="mt-1 text-xs text-foreground/50">维护渠道模型，并在单个模型中配置调用协议、能力和定价。</p>
+                                                    </div>
+                                                    <Form.Item label="模型列表" htmlFor={`channel-${channel.id}-models`} className="mb-0">
+                                                        <Select
+                                                            id={`channel-${channel.id}-models`}
+                                                            mode="tags"
+                                                            showSearch
+                                                            allowClear
+                                                            maxTagCount="responsive"
+                                                            tokenSeparators={[",", "\n"]}
+                                                            placeholder="输入模型名，或点击拉取模型"
+                                                            value={channel.models}
+                                                            onChange={(models) => updateChannel(channel.id, { models: uniqueModels(models) })}
+                                                        />
+                                                    </Form.Item>
+                                                    <ChannelModelSettings channel={channel} onChange={(modelProfiles) => updateChannel(channel.id, { modelProfiles })} />
+                                                </section>
+                                            </div>
+                                        </ModelEditorModal>
+                                    )}
+                                </section>
+                            </Fragment>
                         );
                     })}
                 </div>
@@ -577,19 +649,21 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels, onOpenRun
                 <WorkspaceState
                     icon="settings"
                     compact
-                    title="连接你的第一个模型服务"
+                    title={usage === "all" ? "连接你的第一个模型服务" : "还没有" + MODEL_USAGE_LABELS[usage] + "服务"}
                     action={
                         <Button icon={<Plus className="size-4" />} onClick={addChannel}>
-                            添加模型服务
+                            添加 API 模型服务
                         </Button>
                     }
                 />
             )}
-            {serviceEditor !== undefined && <ModelServiceEditor initial={serviceEditor || undefined} onClose={() => setServiceEditor(undefined)} onSave={saveService} />}
+            {serviceEditor !== undefined && <ModelServiceEditor initial={serviceEditor || undefined} initialCapability={modelUsageCapability(usage)} initialUsage={usage} onClose={() => setServiceEditor(undefined)} onSave={saveService} />}
             {nativeComfyEditor !== undefined && (
                 <NativeComfySettingsModal
                     open
                     initial={nativeComfyEditor}
+                    initialCapability={modelUsageCapability(usage) === "text" ? undefined : modelUsageCapability(usage) as NativeComfyCapability | undefined}
+                    initialUsage={usage}
                     onClose={() => setNativeComfyEditor(undefined)}
                     onSave={async (channel) => {
                         await saveService(channel, "ComfyUI 渠道已保存，可在创作页选择工作流");
@@ -609,12 +683,13 @@ export function applyFetchedChannelModelCatalog(channel: ModelChannel, result: C
     return {
         ...channel,
         models: channel.models.length ? channel.models : uniqueModels(result.models),
-        modelProfiles: profiles.map((profile) => {
-            const previous = existing.get(profile.model);
-            if (!previous) return profile;
-            return seedancePortraitModel(profile.model) ? { ...previous, videoPricing: profile.videoPricing ?? null } : previous;
-        }).concat((channel.modelProfiles || []).filter((profile) => !profiles.some((item) => item.model === profile.model))
-            .map((profile) => seedancePortraitModel(profile.model) ? { ...profile, videoPricing: null } : profile)),
+        modelProfiles: profiles
+            .map((profile) => {
+                const previous = existing.get(profile.model);
+                if (!previous) return profile;
+                return seedancePortraitModel(profile.model) ? { ...previous, videoPricing: profile.videoPricing ?? null } : previous;
+            })
+            .concat((channel.modelProfiles || []).filter((profile) => !profiles.some((item) => item.model === profile.model)).map((profile) => (seedancePortraitModel(profile.model) ? { ...profile, videoPricing: null } : profile))),
     };
 }
 
@@ -668,7 +743,7 @@ function ChannelStatus({ channel, persistence, connection }: { channel: ModelCha
     const label = modelConfigChannelStatusLabel(channel, persistence, connection);
     const testLabel = failed ? `${failed} 个模型测试失败` : passed ? `${passed}/${channel.models.length} 个模型测试通过` : label;
     return (
-        <span className={`settings-channel-status ${error || failed ? "is-warning" : "is-ready"}`}>
+        <span className={`settings-channel-status ${error || failed ? "is-warning" : passed || connection?.state === "connected" ? "is-ready" : ""}`}>
             <i aria-hidden="true" />
             {isBuiltinBeefAPIChannel(channel) ? label : error || (persistence.status === "saving" || persistence.status === "error" ? label : testLabel)}
         </span>
@@ -747,7 +822,11 @@ export function BeefAPIConnectionActions({
     const state = connection?.state || "disconnected";
     const buttonClass = "h-10 sm:h-8";
     if (state === "connecting") {
-        return <Button className={buttonClass} size="small" loading disabled>正在连接</Button>;
+        return (
+            <Button className={buttonClass} size="small" loading disabled>
+                正在连接
+            </Button>
+        );
     }
     if (state === "pending") {
         return (
@@ -875,10 +954,6 @@ function channelConnectionSignature(channel: ModelChannel) {
 function channelProtocolLabel(channel: ModelChannel) {
     if (isNativeComfyChannel(channel)) return "原生 ComfyUI";
     return channelConnectionMode(channel) === "gemini" ? "Gemini 原生" : "OpenAI 兼容";
-}
-
-function isNativeComfyChannel(channel: Pick<ModelChannel, "modelProfiles">) {
-    return channel.modelProfiles?.some((profile) => isNativeComfyProtocol(profile.protocol) || Boolean(profile.comfyui)) === true;
 }
 
 function isKnownDefaultBaseUrl(value: string) {

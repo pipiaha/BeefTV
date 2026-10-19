@@ -14,6 +14,7 @@ export function ModelEditorModal({
     items,
     busy = false,
     admin = false,
+    rootClassName = "",
     children,
 }: {
     title: string;
@@ -26,6 +27,7 @@ export function ModelEditorModal({
     items?: Array<{ key: string; label: string; children: ReactNode }>;
     busy?: boolean;
     admin?: boolean;
+    rootClassName?: string;
     children?: ReactNode | ((tabs: ReactNode) => ReactNode);
 }) {
     const tabs = items?.length ? <Tabs activeKey={activeKey} onChange={onTabChange} animated={false} items={items.map((item) => ({ ...item, forceRender: true, children: <div className="model-editor-panel">{item.children}</div> }))} /> : null;
@@ -37,7 +39,7 @@ export function ModelEditorModal({
             centered
             width={1120}
             destroyOnHidden
-            rootClassName={`${admin ? "admin-modal-root " : ""}model-editor-modal`}
+            rootClassName={`${admin ? "admin-modal-root " : ""}model-editor-modal ${rootClassName}`}
             title={
                 <div>
                     {title}
@@ -49,7 +51,8 @@ export function ModelEditorModal({
             closable={!busy}
             onCancel={onClose}
             footer={footer}
-            flush styles={{ body: { minHeight: 0, flex: 1 }, header: { margin: 0 }, footer: { margin: 0 } }}
+            flush
+            styles={{ body: { minHeight: 0, flex: 1 }, header: { margin: 0 }, footer: { margin: 0 } }}
         >
             {content}
         </AppModal>

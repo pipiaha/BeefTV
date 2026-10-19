@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Form, Input, Segmented, Select, Spin } from "antd";
+import { Alert, Button, Checkbox, Form, Input, Select, Spin } from "antd";
 import { ArrowLeft, Check, ChevronDown, KeyRound, Search, Settings2, ShieldCheck } from "lucide-react";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { ModelLogo } from "@/components/model-logo";
@@ -7,7 +7,8 @@ import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/chann
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image-models";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
-import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, modelCatalogRequestURL, serviceConnectionError, serviceModelProfile, servicePresetFor, type ModelServicePresetId } from "@/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, modelCatalogRequestURL, serviceConnectionError, serviceModelProfile, servicePresetFor, type ModelServicePresetId } from "@/lib/model-service-presets";
+import { MODEL_USAGE_LABELS, MODEL_USAGE_ORDER, modelUsageCapability, profileMatchesUsage, profileUsageLabel, withProfileUsage, type ModelUsage } from "@/lib/model-settings-catalog";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
 import { seedancePortraitLabel } from "@/lib/seedance-portrait";
 import { createModelChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
@@ -16,7 +17,7 @@ import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores
 import "./model-service-editor.css";
 import { getTransportFailureKind } from "@/services/api/request";
 
-export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: ModelChannel; onClose: () => void; onSave: (channel: ModelChannel) => Promise<void> }) {
+export function ModelServiceEditor({ initial, initialCapability, initialUsage = initialCapability || "all", onClose, onSave }: { initial?: ModelChannel; initialCapability?: ModelCapability; initialUsage?: ModelUsage; onClose: () => void; onSave: (channel: ModelChannel) => Promise<void> }) {
     const [draft, setDraft] = useState<ModelChannel>(() => initial ? structuredClone(initial) : { ...createModelChannel(), name: "", baseUrl: "" });
     const [presetId, setPresetId] = useState<ModelServicePresetId>(() => initial ? servicePresetFor(initial) : "compatible");
     const [step, setStep] = useState(initial ? 1 : 0);
@@ -31,9 +32,9 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
     const [query, setQuery] = useState("");
-    const [filter, setFilter] = useState("all");
+    const [filter, setFilter] = useState<ModelUsage>(initialUsage);
     const [manualName, setManualName] = useState("");
-    const [manualCapability, setManualCapability] = useState<ModelCapability>("text");
+    const [manualUsage, setManualUsage] = useState<ModelUsage>(initialUsage === "all" ? "text" : initialUsage);
     const [editingCapabilities, setEditingCapabilities] = useState(false);
     const alive = useRef(true);
     const receipts = useModelConnectionTests((state) => state.receipts);
@@ -117,7 +118,9 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         const id = manualName.trim();
         if (!id) return;
         if (draft.models.includes(id)) { setError("这个模型已在列表中"); return; }
-        const profile = serviceModelProfile(draft, { id }, protocols, manualCapability);
+        const manualCapability = modelUsageCapability(manualUsage)!;
+        const intent = withProfileUsage({ model: id, capability: manualCapability }, manualUsage);
+        const profile = serviceModelProfile({ ...draft, modelProfiles: [...(draft.modelProfiles || []), intent] }, { id }, protocols, manualCapability);
         if (!profile.protocol) {
             setNotice("请在高级模型设置中，为这个模型选择服务商要求的请求协议。");
             setEditingCapabilities(true);
@@ -144,7 +147,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     };
     const visibleModels = catalog.filter((item) => {
         const profile = serviceModelProfile(draft, item, protocols);
-        return `${item.id} ${seedancePortraitLabel(item.id) || item.displayName || ""}`.toLowerCase().includes(query.toLowerCase()) && (filter === "all" || profile.capability === filter);
+        return `${item.id} ${seedancePortraitLabel(item.id) || item.displayName || ""}`.toLowerCase().includes(query.toLowerCase()) && profileMatchesUsage(profile, filter);
     });
     const selectedPreset = MODEL_SERVICE_PRESETS.find((item) => item.id === presetId)!;
 
@@ -184,16 +187,16 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
             </div> : <div className="model-service-models">
                 <div className="model-service-catalog-header"><div><h3>选择你要使用的模型</h3><p>{draft.name || "我的模型服务"} · {catalogRead ? "目录已读取" : "支持手动添加模型"}</p></div><Button icon={<Search size={14} />} loading={busy} disabled={protocolLoading} onClick={() => void fetchModels()}>读取模型</Button></div>
                 <Input aria-label="搜索模型" prefix={<Search size={16} />} placeholder="搜索模型名称" value={query} onChange={(event) => setQuery(event.target.value)} allowClear />
-                <div className="model-service-filter"><Segmented value={filter} onChange={(value) => setFilter(String(value))} options={[{ label: "全部", value: "all" }, ...Object.entries(CAPABILITY_LABELS).map(([value, label]) => ({ value, label }))]} /><span>已选 {draft.models.length} 个</span></div>
+                <div className="model-service-filter"><div className="model-service-usage" role="group" aria-label="按用途筛选模型">{MODEL_USAGE_ORDER.map(value => <button type="button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{MODEL_USAGE_LABELS[value]}</button>)}</div><span>已选 {draft.models.length} 个</span></div>
                 <div className="model-service-catalog">
                     {protocolLoading ? <Spin /> : visibleModels.length ? visibleModels.map((item) => {
                         const profile = serviceModelProfile(draft, item, protocols);
                         const receipt = currentModelConnectionReceipt(receipts, draft, item.id);
                         const displayName = seedancePortraitLabel(item.id) || item.displayName || item.id;
-                        return <label key={item.id} className="model-service-model"><Checkbox disabled={busy} checked={draft.models.includes(item.id)} onChange={(event) => toggleModel(item.id, event.target.checked)} /><span><strong>{displayName}</strong>{displayName !== item.id && <small>{item.id}</small>}</span><span className="model-service-kind">{CAPABILITY_LABELS[profile.capability]}</span><small title={receipt?.detail}>{receipt ? receipt.success ? "测试通过" : "测试失败" : "未测试"}</small></label>;
+                        return <label key={item.id} className="model-service-model"><Checkbox disabled={busy} checked={draft.models.includes(item.id)} onChange={(event) => toggleModel(item.id, event.target.checked)} /><span><strong>{displayName}</strong>{displayName !== item.id && <small>{item.id}</small>}</span><span className="model-service-kind">{profileUsageLabel(profile)}</span><small title={receipt?.detail}>{receipt ? receipt.success ? "测试通过" : "测试失败" : "未测试"}</small></label>;
                     }) : <div className="model-service-empty"><Search size={23} /><strong>{query ? "没有找到匹配的模型" : "添加你的第一个模型"}</strong><p>{query ? "换个关键词，或在下方手动添加。" : "读取服务商的模型目录，或填写准确的模型 ID。"}</p></div>}
                 </div>
-                <div className="model-service-manual"><Input aria-label="模型 ID" placeholder="手动输入模型 ID" value={manualName} disabled={busy} onChange={(event) => setManualName(event.target.value)} onPressEnter={addManual} /><Select aria-label="模型类型" value={manualCapability} disabled={busy} onChange={setManualCapability} options={Object.entries(CAPABILITY_LABELS).map(([value, label]) => ({ value, label }))} /><Button disabled={busy || protocolLoading || !manualName.trim()} onClick={addManual}>添加</Button></div>
+                <div className="model-service-manual"><Input aria-label="模型 ID" placeholder="手动输入模型 ID" value={manualName} disabled={busy} onChange={(event) => setManualName(event.target.value)} onPressEnter={addManual} /><Select aria-label="模型类型" value={manualUsage} disabled={busy} onChange={setManualUsage} options={MODEL_USAGE_ORDER.filter(value => value !== "all").map(value => ({ value, label: MODEL_USAGE_LABELS[value] }))} /><Button disabled={busy || protocolLoading || !manualName.trim()} onClick={addManual}>添加</Button></div>
                 {draft.models.length > 0 && <><button type="button" className="model-service-advanced" aria-expanded={editingCapabilities} onClick={() => setEditingCapabilities(!editingCapabilities)}><Settings2 size={15} />高级模型设置与测试<ChevronDown size={14} /></button>{editingCapabilities && <ChannelModelSettings draft channel={draft} onChange={(modelProfiles) => setDraft((current) => ({ ...current, modelProfiles }))} />}</>}
             </div>}
             {(error || notice) && <div className="model-service-feedback">{error && <Alert type="error" showIcon title={error} />}{notice && <Alert type="info" showIcon title={notice} />}</div>}

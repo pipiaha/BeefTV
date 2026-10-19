@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, App, Button, Popconfirm, Segmented, Tag } from "antd";
+import { Alert, App, Button, Checkbox, Popconfirm, Segmented, Tag } from "antd";
 import { ReferenceMediaTransportFields } from "./reference-media-transport-fields";
 import { ChevronRight, FlaskConical, Settings2 } from "lucide-react";
 
@@ -12,7 +12,8 @@ import { type ModelCapabilityChoice } from "@/components/model-protocol-picker";
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import { defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCapabilityFromModel, modelProtocolCapability, modelProtocolDefinition, type ModelProtocol, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
-import { modelOptionName, type ModelChannel } from "@/stores/use-config-store";
+import { modelOptionName, type AudioModelUse, type ModelChannel } from "@/stores/use-config-store";
+import { AUDIO_USE_LABELS, audioUsesForProfile, profileUsageLabel } from "@/lib/model-settings-catalog";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
 
 type ModelProfile = NonNullable<ModelChannel["modelProfiles"]>[number];
@@ -107,7 +108,7 @@ export function ChannelModelSettings({ channel, onChange, draft = false }: { cha
                                 </div>
                                 <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
                                     <Tag className="mr-0 text-[var(--fs-tiny)]" bordered={false}>
-                                        {capabilityLabel(capability)}
+                                        {profile ? profileUsageLabel(profile) : capabilityLabel(capability)}
                                     </Tag>
                                     <span className="truncate font-mono text-[var(--fs-tiny)] text-foreground/40" title={modelProtocolDefinition(protocol, availableProtocols)?.create}>
                                         {modelProtocolDefinition(protocol, availableProtocols)?.create || "待配置请求协议"}
@@ -168,6 +169,7 @@ export function ChannelModelSettings({ channel, onChange, draft = false }: { cha
                                     }}
                                 />
                             </section>
+                            {activeCapability === "audio" && <section className="space-y-2"><div className="text-xs font-medium">音频用途</div><Checkbox.Group aria-label="模型音频用途" value={audioUsesForProfile(activeModelProfile || { capability: "audio", protocol: activeProtocol })} options={Object.entries(AUDIO_USE_LABELS).map(([value, label]) => ({ value, label }))} onChange={values => updateProfile(activeModel, { audioUses: values as AudioModelUse[] })} /><p className="text-xs text-foreground/50">按实际能力选择，可多选。未设置时归入“其他音频”。用途不替代请求协议。</p></section>}
                             {channel.scope !== "system" && activeCapability !== "text" && activeProtocol !== "full-video" && <ReferenceMediaTransportFields value={activeModelProfile?.referenceMediaTransport} onChange={(referenceMediaTransport) => updateProfile(activeModel, { referenceMediaTransport })} />}
                             <section className="space-y-2">
                                 <div className="text-xs font-medium">请求协议</div>
