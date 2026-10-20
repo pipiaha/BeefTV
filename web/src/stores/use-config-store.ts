@@ -1269,6 +1269,18 @@ export function isSystemProxyBaseUrl(baseUrl: string) {
 
 export function systemProxyChannelId(baseUrl: string) {
     const value = baseUrl.trim();
+    if (!value) return "";
+    // 只有指向本应用自身的地址才可能是系统代理；外部 API 地址
+    // （如 https://open.bigmodel.cn/api/anthropic）不应被误判后遭过滤。
+    if (/^[a-z][a-z0-9+.\-]*:\/\//i.test(value)) {
+        try {
+            const url = new URL(value);
+            if (typeof window !== "undefined" && window.location?.origin &&
+                url.origin !== window.location.origin) return "";
+        } catch {
+            return "";
+        }
+    }
     const lowerValue = value.toLowerCase();
     for (const marker of ["/api/ai/system/", "/api/"]) {
         const index = lowerValue.lastIndexOf(marker);
