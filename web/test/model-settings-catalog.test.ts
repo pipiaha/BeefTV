@@ -116,6 +116,30 @@ describe("model settings preserve shared service state", () => {
     });
 });
 describe("ComfyUI basic controls", () => {
+    test("music and speech controls follow actual node fields, enums and bounds without adding image dimensions", () => {
+        const graph = {
+            music: { class_type: "MusicConditioning", inputs: { lyrics: "hello", bpm: 120, max_duration: 6, latent: ["model", 0] } },
+            speech: { class_type: "SpeechOptions", inputs: { voice: "one", language: "zh", speed: 1, normalize: true } },
+            save: { class_type: "SaveAudio", inputs: {} },
+        };
+        const flow = { ...parseNativeComfyApiGraph(graph), outputNodeId: "save", outputField: "audio" };
+        const controls = nativeComfyInputControls(flow, {
+            SpeechOptions: { input: { required: { voice: [["one", "two"]], speed: ["FLOAT", { min: 0.5, max: 2, step: 0.1 }] } } },
+        });
+        expect(controls.parameters.some((input) => input.fieldName === "width" || input.fieldName === "height" || input.fieldName === "latent")).toBe(false);
+        expect(controls.parameters.find((input) => input.fieldName === "lyrics")?.value).toBe("hello");
+        const voice = controls.parameters.find((input) => input.fieldName === "voice")!;
+        expect(voice.choices).toEqual(["one", "two"]);
+        expect(updateNativeComfyInput(flow, voice, "two").graph.speech.inputs).toMatchObject({ voice: "two" });
+        expect(() => updateNativeComfyInput(flow, voice, "missing")).toThrow("选项");
+        const speed = controls.parameters.find((input) => input.fieldName === "speed")!;
+        expect(speed).toMatchObject({ min: 0.5, max: 2, step: 0.1 });
+        expect(() => updateNativeComfyInput(flow, speed, 3)).toThrow("范围");
+        expect(() => updateNativeComfyInput(flow, speed, NaN)).toThrow("范围");
+        const enabled = controls.parameters.find((input) => input.fieldName === "normalize")!;
+        expect(updateNativeComfyInput(flow, enabled, false).graph.speech.inputs).toMatchObject({ normalize: false });
+        expect(flow.graph.speech.inputs).toMatchObject({ normalize: true, voice: "one" });
+    });
     test("output inference follows ComfyUI file fields and requires an explicit choice for ambiguity", () => {
         for (const [class_type, field] of [
             ["SaveImage", "images"],

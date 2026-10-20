@@ -102,7 +102,7 @@ export function inferNativeComfyOutput(graph: Record<string, Record<string, unkn
     return { outputNodeId, outputField: /Audio/.test(classType) ? "audio" : /VideoCombine/.test(classType) ? "gifs" : "images" };
 }
 
-export type ComfyInputControl = { nodeId: string; fieldName: string; label: string; value: string | number; choices?: string[]; min?: number; max?: number; step?: number; bound: boolean };
+export type ComfyInputControl = { nodeId: string; fieldName: string; label: string; value: string | number | boolean; choices?: string[]; min?: number; max?: number; step?: number; bound: boolean };
 const BASIC_LABELS: Record<string, string> = {
     width: "宽度",
     height: "高度",
@@ -113,13 +113,44 @@ const BASIC_LABELS: Record<string, string> = {
     length: "帧数",
     num_frames: "帧数",
     frame_count: "帧数",
+    frames: "帧数",
     fps: "帧率",
     frame_rate: "帧率",
     duration: "时长（秒）",
+    duration_seconds: "时长（秒）",
     seconds: "时长（秒）",
+    audio_duration: "音频时长（秒）",
+    max_duration: "最长时长（秒）",
+    min_duration: "最短时长（秒）",
+    cfg_scale: "提示词强度",
+    caption: "描述",
+    speaker_id: "说话人",
+    bpm: "节奏（BPM）",
+    lyrics: "歌词",
+    tags: "风格",
+    text: "文本",
+    prompt: "提示词",
+    voice: "音色",
+    speaker: "说话人",
+    language: "语言",
+    speed: "语速",
+    pitch: "音调",
+    volume: "音量",
     batch_size: "生成数量",
 };
-const MODEL_LABELS: Record<string, string> = { ckpt_name: "Checkpoint", unet_name: "扩散模型", vae_name: "VAE", lora_name: "LoRA", clip_name: "文本编码器", clip_name1: "文本编码器 1", clip_name2: "文本编码器 2" };
+const MODEL_LABELS: Record<string, string> = {
+    ckpt_name: "Checkpoint",
+    unet_name: "扩散模型",
+    vae_name: "VAE",
+    lora_name: "LoRA",
+    clip_name: "文本编码器",
+    clip_name1: "文本编码器 1",
+    clip_name2: "文本编码器 2",
+    model_name: "主模型",
+    diffusion_model: "扩散模型",
+    text_encoder_name: "文本编码器",
+    control_net_name: "控制模型",
+};
 
 export function nativeComfyInputControls(flow: NativeComfyWorkflow, nodes?: Record<string, unknown>) {
     const models: ComfyInputControl[] = [];
@@ -127,8 +158,10 @@ export function nativeComfyInputControls(flow: NativeComfyWorkflow, nodes?: Reco
     for (const [nodeId, node] of Object.entries(flow.graph)) {
         const schema = nodes?.[String(node.class_type)] as { input?: { required?: Record<string, unknown>; optional?: Record<string, unknown> } } | undefined;
         for (const [fieldName, value] of Object.entries((node.inputs || {}) as Record<string, unknown>)) {
-            const label = MODEL_LABELS[fieldName] || BASIC_LABELS[fieldName];
-            if (!label || (typeof value !== "string" && typeof value !== "number")) continue;
+            if (!["string", "number", "boolean"].includes(typeof value)) continue;
+            const field = flow.fields.find((field) => field.nodeId === nodeId && field.fieldName === fieldName);
+            const label = MODEL_LABELS[fieldName] || BASIC_LABELS[fieldName] || (field?.safeToOverride !== false ? field?.label || fieldName : "");
+            if (!label) continue;
             const spec = schema?.input?.required?.[fieldName] || schema?.input?.optional?.[fieldName];
             const tuple = Array.isArray(spec) ? spec : [];
             const meta = tuple[1] && typeof tuple[1] === "object" ? (tuple[1] as Record<string, unknown>) : {};
@@ -140,24 +173,27 @@ export function nativeComfyInputControls(flow: NativeComfyWorkflow, nodes?: Reco
                 nodeId,
                 fieldName,
                 label,
-                value: !bound && typeof configured === typeof value ? (configured as string | number) : value,
+                value: !bound && typeof configured === typeof value ? (configured as string | number | boolean) : (value as string | number | boolean),
                 bound,
                 min: typeof meta.min === "number" ? meta.min : undefined,
                 max: typeof meta.max === "number" ? Math.min(meta.max, Number.MAX_SAFE_INTEGER) : undefined,
                 step: typeof meta.step === "number" ? meta.step : fieldName === "cfg" ? 0.1 : 1,
             };
             if (MODEL_LABELS[fieldName]) models.push({ ...control, choices: choices?.filter((item): item is string => typeof item === "string") });
-            else if (typeof value === "number") parameters.push(control);
+            else parameters.push({ ...control, choices: choices?.filter((item): item is string => typeof item === "string") });
         }
     }
+    parameters.sort((left, right) => Number(Boolean(BASIC_LABELS[right.fieldName])) - Number(Boolean(BASIC_LABELS[left.fieldName])));
     return { models, parameters };
 }
 
-export function updateNativeComfyInput(flow: NativeComfyWorkflow, input: ComfyInputControl, value: string | number): NativeComfyWorkflow {
+export function updateNativeComfyInput(flow: NativeComfyWorkflow, input: ComfyInputControl, value: string | number | boolean): NativeComfyWorkflow {
     if (input.bound) throw new Error("该字段由生成参数映射，请在高级设置中调整绑定");
     const node = flow.graph[input.nodeId];
     const inputs = node?.inputs as Record<string, unknown> | undefined;
     if (!inputs || typeof inputs[input.fieldName] !== typeof value) throw new Error("工作流字段类型不匹配");
+    if (typeof value === "number" && (!Number.isFinite(value) || (input.min !== undefined && value < input.min) || (input.max !== undefined && value > input.max))) throw new Error("参数超出目标节点允许范围");
+    if (input.choices?.length && !input.choices.includes(String(value))) throw new Error("请选择目标节点提供的选项");
     return {
         ...flow,
         graph: { ...flow.graph, [input.nodeId]: { ...node, inputs: { ...inputs, [input.fieldName]: value } } },

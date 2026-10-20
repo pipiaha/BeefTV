@@ -26,7 +26,7 @@ export default function SettingsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
     const requestedSection = searchParams.get("section");
     const customChannelsEnabled = useUserStore((state) => state.features.customChannelsEnabled);
-    const initialSection = isConfigSection(requestedSection) ? requestedSection : "channels";
+    const initialSection = isConfigSection(requestedSection) && requestedSection !== "models" ? requestedSection : "channels";
     const [activeTab, setActiveTab] = useState<ConfigSectionKey>(initialSection);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
@@ -40,7 +40,7 @@ export default function SettingsPage() {
     }, []);
 
     useEffect(() => {
-        setActiveTab(isConfigSection(requestedSection) && (requestedSection !== "storage" || nativeStorage) ? requestedSection : "channels");
+        setActiveTab(isConfigSection(requestedSection) && requestedSection !== "models" && (requestedSection !== "storage" || nativeStorage) ? requestedSection : "channels");
     }, [requestedSection, nativeStorage]);
 
     const selectSection = (section: ConfigSectionKey) => {
@@ -124,22 +124,7 @@ export default function SettingsPage() {
             <div className="settings-library-frame flex min-h-0 flex-1 flex-col md:flex-row">
                 <section className="settings-content flex min-h-0 min-w-0 flex-1 flex-col">
                     <div className="app-workspace-scroll app-section-page-content min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                        <div className="settings-pane-root mx-auto w-full max-w-none">
-                            {activeTab !== "storage" && (
-                                <nav className="model-settings-navigation" aria-label="模型设置分区">
-                                    <span>模型设置</span>
-                                    <div>
-                                        <button type="button" aria-pressed={activeTab !== "models"} onClick={() => selectSection("channels")}>
-                                            服务接入
-                                        </button>
-                                        <button type="button" aria-pressed={activeTab === "models"} onClick={() => selectSection("models")}>
-                                            默认模型
-                                        </button>
-                                    </div>
-                                </nav>
-                            )}
-                            {panes[activeTab === "diagnostics" ? "channels" : activeTab]}
-                        </div>
+                        <div className="settings-pane-root mx-auto w-full max-w-none">{panes[activeTab === "diagnostics" ? "channels" : activeTab]}</div>
                     </div>
                 </section>
             </div>

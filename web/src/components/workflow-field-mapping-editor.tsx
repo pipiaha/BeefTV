@@ -10,7 +10,7 @@ import type { WorkflowFieldMapping } from "@/stores/use-config-store";
 import { workflowFieldChoiceValues, workflowFieldConfigurationError, workflowFieldNumberBounds, workflowFieldPresetOptions } from "@/lib/model-capabilities";
 import { EmptyState } from "@/components/ui/product/empty-state";
 
-const sourceOptions = [
+export const sourceOptions = [
     { label: "保留工作流默认值", value: "" },
     { label: "任务提示词", value: "prompt" },
     { label: "系统提示词", value: "systemPrompt" },
@@ -244,7 +244,7 @@ function DefaultValueInput({ field, disabled, onChange }: { field: WorkflowField
     return <Input.TextArea autoSize={{ minRows: 1, maxRows: 4 }} value={displayValue(value)} disabled={disabled} onChange={(event) => onChange(event.target.value)} />;
 }
 
-function sourcePatch(field: WorkflowFieldMapping, source: string): Partial<WorkflowFieldMapping> {
+export function sourcePatch(field: WorkflowFieldMapping, source: string): Partial<WorkflowFieldMapping> {
     if (source === "referenceImage") return { source, bindPrompt: false, sourceAutomatic: false, imageOrder: Math.max(1, Number(field.imageOrder) || 1), sourceIndex: undefined };
     if (source === "referenceVideo" || source === "referenceAudio") return { source, bindPrompt: false, sourceAutomatic: false, sourceIndex: Math.max(0, Number(field.sourceIndex) || 0), imageOrder: undefined };
     return { source, bindPrompt: false, sourceAutomatic: false, sourceIndex: undefined, imageOrder: undefined, required: source ? field.required : false };

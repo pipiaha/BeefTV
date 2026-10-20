@@ -4,14 +4,8 @@ import { useEffect, useRef } from "react";
 
 import { assistantModelOptions, normalizeAssistantModel } from "@/lib/assistant-model";
 import { groupModelsByDisplayName } from "@/lib/model-selection";
-import {
-    filterModelsByCapability,
-    isBuiltinBeefAPIChannel,
-    modelDisplayName,
-    resolveModelChannel,
-    type AiConfig,
-    type ModelCapability,
-} from "@/stores/use-config-store";
+import { modelUsageCapability, type ModelUsage } from "@/lib/model-settings-catalog";
+import { filterModelsByCapability, isBuiltinBeefAPIChannel, modelDisplayName, resolveModelChannel, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 
 import { recordModelPickerChange, recordModelPickerOpenChange, recordModelPickerPress, watchModelPickerBlockers, type ModelPickerSnapshot } from "./model-settings-diagnostics";
@@ -43,7 +37,7 @@ const rows: Array<CapabilityRow | AssistantRow> = [
     { kind: "capability", id: "audio", capability: "audio", modelKey: "audioModel", title: "默认音频模型", icon: AudioLines },
 ];
 
-export function ModelDefaultGrid({ config, onChange, onOpenChannels }: { config: AiConfig; onChange: (key: DefaultModelKey, model: string) => void; onOpenChannels?: () => void }) {
+export function ModelDefaultGrid({ config, onChange, onOpenChannels, usage }: { config: AiConfig; onChange: (key: DefaultModelKey, model: string) => void; onOpenChannels?: () => void; usage?: ModelUsage }) {
     const localMode = workspaceCapabilities().local;
     const rootRef = useRef<HTMLDivElement>(null);
     useEffect(() => (rootRef.current ? watchModelPickerBlockers(rootRef.current) : undefined), []);
@@ -52,63 +46,79 @@ export function ModelDefaultGrid({ config, onChange, onOpenChannels }: { config:
     const assistantOptions = assistantModelOptions(config);
     return (
         <div ref={rootRef} className="model-default-settings">
-            {rows.map((row) => {
-                const isAssistant = row.kind === "assistant";
-                const models = isAssistant ? assistantOptions : filterModelsByCapability(config.models, row.capability, config.channels);
-                const selected = isAssistant ? assistantModel : config[row.modelKey];
-                const groups = !isAssistant && row.capability === "video"
-                    ? groupModelsByDisplayName(config, models)
-                    : models.map((model) => ({ key: model, models: [model] }));
-                const options = groups.map((group) => {
-                    const model = group.models.includes(selected) ? selected : group.models[0];
-                    const label = modelDisplayName(config, model);
-                    const modelChannel = resolveModelChannel(config, model);
-                    const channel = isBuiltinBeefAPIChannel(modelChannel) ? "BeefTV" : modelChannel.name || "未命名渠道";
-                    return { value: model, label, searchLabel: `${label} ${channel}`, channel };
-                });
-                if (isAssistant) options.unshift({ value: "", label: "跟随默认文本模型", searchLabel: "跟随默认文本模型", channel: "" });
-                const unavailable = isAssistant ? Boolean(config.assistantModel && !selected) : Boolean(selected && !options.some((option) => option.value === selected));
-                const value = unavailable ? undefined : isAssistant && !config.assistantModel ? "" : options.some((option) => option.value === selected) ? selected : undefined;
-                const Icon = row.icon;
-                const snapshot: ModelPickerSnapshot = { pickerId: row.id, title: row.title, optionCount: options.length, hasValue: value !== undefined && value !== "", unavailable, disabled: !options.length, buildMs: performance.now() - buildStartedAt };
-                return (
-                    <section key={row.id} className="model-default-setting-row" aria-labelledby={`default-${row.id}-title`}>
-                        <div className="model-default-setting-label">
-                            <Icon className="size-4 shrink-0 text-foreground/50" />
-                            <h3 id={`default-${row.id}-title`}>{row.title}</h3>
-                        </div>
-                        <div className="model-default-setting-control" onPointerDownCapture={(event) => {
-                            if (event.target instanceof Element && event.target.closest(".model-default-select")) recordModelPickerPress(snapshot, { x: event.clientX, y: event.clientY });
-                        }}>
-                            <Select
-                                aria-label={row.title}
-                                className="model-default-select"
-                                data-model-picker-id={row.id}
-                                value={value}
-                                options={options}
-                                placeholder={unavailable ? "已选模型不可用，请重新选择" : options.length ? "选择模型" : "暂无可用模型"}
-                                disabled={!options.length}
-                                showSearch={{ optionFilterProp: "searchLabel" }}
-                                listHeight={256}
-                                popupMatchSelectWidth
-                                classNames={{ popup: { root: `model-default-select-popup model-default-select-popup-${row.id}` } }}
-                                optionRender={(option) => (
-                                    <div className="model-default-select-option">
-                                        <span>{option.data.label}</span>
-                                        {option.data.channel ? <span className="model-default-select-channel">{option.data.channel}</span> : null}
-                                    </div>
-                                )}
-                                onOpenChange={(open) => recordModelPickerOpenChange(snapshot, open)}
-                                onChange={(model) => {
-                                    recordModelPickerChange(snapshot);
-                                    onChange(row.modelKey, model);
+            {rows
+                .filter((row) => !usage || usage === "all" || (row.kind === "assistant" ? usage === "text" : row.capability === modelUsageCapability(usage)))
+                .map((row) => {
+                    const isAssistant = row.kind === "assistant";
+                    const models = isAssistant ? assistantOptions : filterModelsByCapability(config.models, row.capability, config.channels).filter((model) => resolveModelChannel(config, model).enabled !== false);
+                    const selected = isAssistant ? assistantModel : config[row.modelKey];
+                    const groups = !isAssistant && row.capability === "video" ? groupModelsByDisplayName(config, models) : models.map((model) => ({ key: model, models: [model] }));
+                    const options = groups.map((group) => {
+                        const model = group.models.includes(selected) ? selected : group.models[0];
+                        const label = modelDisplayName(config, model);
+                        const modelChannel = resolveModelChannel(config, model);
+                        const channel = isBuiltinBeefAPIChannel(modelChannel) ? "BeefTV" : modelChannel.name || "未命名渠道";
+                        return { value: model, label, searchLabel: `${label} ${channel}`, channel };
+                    });
+                    if (isAssistant) options.unshift({ value: "", label: "跟随默认文本模型", searchLabel: "跟随默认文本模型", channel: "" });
+                    const unavailable = isAssistant ? Boolean(config.assistantModel && !selected) : Boolean(selected && !options.some((option) => option.value === selected));
+                    const value = unavailable ? undefined : isAssistant && !config.assistantModel ? "" : options.some((option) => option.value === selected) ? selected : undefined;
+                    const Icon = row.icon;
+                    const snapshot: ModelPickerSnapshot = {
+                        pickerId: row.id,
+                        title: row.title,
+                        optionCount: options.length,
+                        hasValue: value !== undefined && value !== "",
+                        unavailable,
+                        disabled: !options.length,
+                        buildMs: performance.now() - buildStartedAt,
+                    };
+                    return (
+                        <section key={row.id} className="model-default-setting-row" aria-labelledby={`default-${row.id}-title`}>
+                            <div className="model-default-setting-label">
+                                <Icon className="size-4 shrink-0 text-foreground/50" />
+                                <h3 id={`default-${row.id}-title`}>{row.title}</h3>
+                                {usage && row.id === "audio" && <small>音乐、配音和音效共用此默认模型</small>}
+                            </div>
+                            <div
+                                className="model-default-setting-control"
+                                onPointerDownCapture={(event) => {
+                                    if (event.target instanceof Element && event.target.closest(".model-default-select")) recordModelPickerPress(snapshot, { x: event.clientX, y: event.clientY });
                                 }}
-                            />
-                            {!options.length && localMode && onOpenChannels ? <Button type="link" size="small" onClick={onOpenChannels}>添加模型渠道</Button> : null}
-                        </div>
-                    </section>
-                );
-            })}
+                            >
+                                <Select
+                                    aria-label={row.title}
+                                    className="model-default-select"
+                                    data-model-picker-id={row.id}
+                                    value={value}
+                                    options={options}
+                                    placeholder={unavailable ? "已选模型不可用，请重新选择" : options.length ? "选择模型" : "暂无可用模型"}
+                                    disabled={!options.length}
+                                    showSearch={{ optionFilterProp: "searchLabel" }}
+                                    listHeight={256}
+                                    popupMatchSelectWidth
+                                    classNames={{ popup: { root: `model-default-select-popup model-default-select-popup-${row.id}` } }}
+                                    optionRender={(option) => (
+                                        <div className="model-default-select-option">
+                                            <span>{option.data.label}</span>
+                                            {option.data.channel ? <span className="model-default-select-channel">{option.data.channel}</span> : null}
+                                        </div>
+                                    )}
+                                    onOpenChange={(open) => recordModelPickerOpenChange(snapshot, open)}
+                                    onChange={(model) => {
+                                        recordModelPickerChange(snapshot);
+                                        onChange(row.modelKey, model);
+                                    }}
+                                />
+                                {!options.length && localMode && onOpenChannels ? (
+                                    <Button type="link" size="small" onClick={onOpenChannels}>
+                                        添加模型渠道
+                                    </Button>
+                                ) : null}
+                            </div>
+                        </section>
+                    );
+                })}
         </div>
     );
 }
