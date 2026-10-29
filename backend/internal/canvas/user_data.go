@@ -134,6 +134,11 @@ func (s *Service) UserCanvasProject(userID string, id string) (json.RawMessage, 
 	return canvasProjectPayload(*project)
 }
 
+// UserCanvasProjectRevision checks ownership without loading the canvas document.
+func (s *Service) UserCanvasProjectRevision(userID string, id string) (int64, error) {
+	return s.repo.CanvasProjectRevisionForUser(userID, id)
+}
+
 func (s *Service) UpsertUserCanvasProject(userID string, raw json.RawMessage) (UserDataSummary, error) {
 	return s.upsertUserCanvasProjectWithHistory(userID, raw, "automatic")
 }

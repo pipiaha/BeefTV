@@ -539,15 +539,11 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 			failService(c, err)
 			return
 		}
-		project, err := canvasData.UserCanvasProject(user.ID, c.Param("id"))
+		revision, err := canvasData.UserCanvasProjectRevision(user.ID, c.Param("id"))
 		if err != nil {
 			failService(c, err)
 			return
 		}
-		var initial struct {
-			Revision int64 `json:"revision"`
-		}
-		_ = json.Unmarshal(project, &initial)
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")
@@ -556,9 +552,9 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 		if !ok {
 			return
 		}
-		_, _ = fmt.Fprintf(c.Writer, "event: ready\ndata: {\"revision\":%d}\n\n", initial.Revision)
+		_, _ = fmt.Fprintf(c.Writer, "event: ready\ndata: {\"revision\":%d}\n\n", revision)
 		flusher.Flush()
-		last := initial.Revision
+		last := revision
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -566,17 +562,14 @@ func registerUserDataRoutes(r *gin.RouterGroup, svc *app.Service) {
 			case <-c.Request.Context().Done():
 				return
 			case <-ticker.C:
-				latest, readErr := canvasData.UserCanvasProject(user.ID, c.Param("id"))
+				latest, readErr := canvasData.UserCanvasProjectRevision(user.ID, c.Param("id"))
 				if readErr != nil {
 					return
 				}
-				var state struct {
-					Revision int64 `json:"revision"`
-				}
-				if json.Unmarshal(latest, &state) != nil || state.Revision <= last {
+				if latest <= last {
 					continue
 				}
-				last = state.Revision
+				last = latest
 				_, _ = fmt.Fprintf(c.Writer, "event: canvas.updated\ndata: {\"revision\":%d}\n\n", last)
 				flusher.Flush()
 			}

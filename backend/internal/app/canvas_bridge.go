@@ -639,3 +639,7 @@ func (s *Service) UserAsset(userID string, id string) (json.RawMessage, error) {
 func (s *Service) UserCanvasProject(userID string, id string) (json.RawMessage, error) {
 	return s.canvasDomain().UserCanvasProject(userID, id)
 }
+
+func (s *Service) UserCanvasProjectRevision(userID string, id string) (int64, error) {
+	return s.canvasDomain().UserCanvasProjectRevision(userID, id)
+}

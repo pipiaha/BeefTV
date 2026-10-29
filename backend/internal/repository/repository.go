@@ -1085,6 +1085,14 @@ func (r *Repository) CanvasProjectForUser(userID string, id string) (*model.Canv
 	return &project, nil
 }
 
+func (r *Repository) CanvasProjectRevisionForUser(userID string, id string) (int64, error) {
+	var project model.CanvasProject
+	if err := r.db.Select("revision").First(&project, "id = ? AND user_id = ?", id, userID).Error; err != nil {
+		return 0, err
+	}
+	return project.Revision, nil
+}
+
 func (r *Repository) UpsertCanvasProject(project *model.CanvasProject) error {
 	expected := project.Revision
 	if expected < 0 {
