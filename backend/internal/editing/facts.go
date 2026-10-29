@@ -28,6 +28,9 @@ func ApplySourceFacts(plan *Plan, facts map[string]SourceFacts) error {
 		}
 		switch seg.Kind {
 		case KindImage:
+			if !fact.HasVideo {
+				return fmt.Errorf("%w：%s", ErrMissingVideoTrack, seg.ClipID)
+			}
 			seg.HasAudio = false
 		case KindVideo:
 			if !fact.HasVideo {

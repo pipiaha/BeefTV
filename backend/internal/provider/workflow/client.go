@@ -67,6 +67,9 @@ func (c *Client) Run(ctx context.Context, input Input) (map[string]interface{}, 
 	if isRunningHubInterface(input.Config.InterfaceType) {
 		return exec.runRunningHub(ctx, input)
 	}
+	if IsNativeComfyInterface(input.Config.InterfaceType) {
+		return exec.RunNativeComfy(ctx, input)
+	}
 	if err := exec.requireActor(ctx, input.Config.InterfaceType); err != nil {
 		return nil, err
 	}
@@ -337,6 +340,12 @@ func (c *Client) PollVideo(ctx context.Context, config Config, root string, task
 // never enters the workflow/app creation or schema discovery paths.
 func (c *Client) QueryVideo(ctx context.Context, config Config, root, taskID string) (map[string]interface{}, string, error) {
 	c = c.prepared()
+	if IsNativeComfyInterface(config.InterfaceType) {
+		if err := validateNativeComfyConfig("video", config); err != nil {
+			return nil, "", err
+		}
+		return c.queryNativeComfy(ctx, config, Input{Mode: "video", Config: config}, taskID)
+	}
 	if err := c.requireActor(ctx, config.InterfaceType); err != nil {
 		return nil, "", err
 	}

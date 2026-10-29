@@ -5,9 +5,12 @@ BeefTV 是一个本地优先、轻量、AI Native 的视频工作台。本页只
 ## 开始使用
 
 - [项目首页与快速开始](../README.md)
+- [Fork 项目现状与跨机器交接](fork-handoff.md)
 - [功能概览](content/docs/overview/features.mdx)
 - [Agent、Skills 与工作流实机案例](content/docs/overview/examples.mdx)
 - [本地优先架构](local-first-architecture.md)
+- [人机协作工作台约定](human-agent-workbench.md)
+- [外部 Agent 接入](agent-onboarding.md)
 - [桌面端本地开发](desktop-local-development.md)
 - [创作助手测试分支安装与试用](agent-branch-testing.md)
 - [桌面端发布](desktop-release.md)
@@ -16,6 +19,7 @@ BeefTV 是一个本地优先、轻量、AI Native 的视频工作台。本页只
 
 - [本地工作区数据源](local-workspace-data-sources.md)
 - [模型配置持久化](local-model-config-persistence.md)
+- [模型设置与 ComfyUI 配置](model-settings.md)
 - [桌面账号与钱包](content/docs/backend/desktop-account.mdx)
 - [模型服务商验证](model-provider-validation.md)
 - [视频提示词长度与接入接口](content/docs/backend/video-prompt-limits.mdx)

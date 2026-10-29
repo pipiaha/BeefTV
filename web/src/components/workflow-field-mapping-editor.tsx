@@ -10,7 +10,7 @@ import type { WorkflowFieldMapping } from "@/stores/use-config-store";
 import { workflowFieldChoiceValues, workflowFieldConfigurationError, workflowFieldNumberBounds, workflowFieldPresetOptions } from "@/lib/model-capabilities";
 import { EmptyState } from "@/components/ui/product/empty-state";
 
-const sourceOptions = [
+export const sourceOptions = [
     { label: "保留工作流默认值", value: "" },
     { label: "任务提示词", value: "prompt" },
     { label: "系统提示词", value: "systemPrompt" },
@@ -75,7 +75,7 @@ export function WorkflowFieldMappingEditor({ fields, onChange, disabled = false 
         <div className="workflow-field-mapping-editor space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-foreground/60">
-                    共 {fields.length} 个字段，已开启 {enabledCount} 个。字段调整会立即保存到当前工作流。
+                    共 {fields.length} 个字段，已开启 {enabledCount} 个。字段调整会立即更新当前编辑中的工作流。
                 </p>
                 <div className="flex flex-wrap items-center gap-1">
                     <Button type="text" size="small" icon={<Power className="size-3.5" />} disabled={disabled || enabledControllableCount === controllableFields.length} onClick={() => updateAllFields(true)}>
@@ -244,7 +244,7 @@ function DefaultValueInput({ field, disabled, onChange }: { field: WorkflowField
     return <Input.TextArea autoSize={{ minRows: 1, maxRows: 4 }} value={displayValue(value)} disabled={disabled} onChange={(event) => onChange(event.target.value)} />;
 }
 
-function sourcePatch(field: WorkflowFieldMapping, source: string): Partial<WorkflowFieldMapping> {
+export function sourcePatch(field: WorkflowFieldMapping, source: string): Partial<WorkflowFieldMapping> {
     if (source === "referenceImage") return { source, bindPrompt: false, sourceAutomatic: false, imageOrder: Math.max(1, Number(field.imageOrder) || 1), sourceIndex: undefined };
     if (source === "referenceVideo" || source === "referenceAudio") return { source, bindPrompt: false, sourceAutomatic: false, sourceIndex: Math.max(0, Number(field.sourceIndex) || 0), imageOrder: undefined };
     return { source, bindPrompt: false, sourceAutomatic: false, sourceIndex: undefined, imageOrder: undefined, required: source ? field.required : false };

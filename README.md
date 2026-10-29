@@ -38,6 +38,7 @@
   <a href="#skills">Skills</a> ·
   <a href="docs/content/docs/overview/features.mdx">功能清单</a> ·
   <a href="QUICKSTART.md">开始使用</a> ·
+  <a href="docs/agent-onboarding.md">Agent 接入</a> ·
   <a href="CONTRIBUTING.md">参与贡献</a>
 </p>
 
@@ -161,6 +162,14 @@ BeefTV 同时提供项目库、个人资产库、异步任务、模型渠道与�
 3. 新建画布，添加参考素材，向创作助手描述目标；也可从节点开始自由创作。
 
 模型配置与源码构建见 [快速开始](QUICKSTART.md)，打包要求见[桌面发布文档](docs/desktop-release.md)。
+
+当前 fork 还包含原生 ComfyUI 与外部 Agent 接入扩展，维护边界见 [Fork 交接](docs/fork-handoff.md)。
+
+## 外部 Agent 接入
+
+在工作台「BeefTV MCP」页面为客户端生成连接配置，加载后首先调用 `beeftv_get_started`。MCP 握手会提示这个入口，工具会返回操作指南、实时画布和当前启用的原生工作流；Agent 无需继承历史聊天或额外获取本地接入包。
+
+完整步骤见[外部 Agent 接入](docs/agent-onboarding.md)。操作指南与程序一同托管在[仓库](backend/cmd/beeftv/agent-guide.md)，并编译进 MCP 服务。首次安装仍需用户授权客户端连接；支持标准 MCP stdio 且能运行本机服务的 Agent 均使用同一入口。
 
 ## 贡献与许可
 

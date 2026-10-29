@@ -16,7 +16,13 @@ BeefTV（`glanderness/BeefTV`）是面向 AI 影视与短剧创作的工作台�
 
 根目录脚本负责 Wails 与本地开发验证。主线不依赖 PostgreSQL、Redis、登录或多租户部署。
 
+本 fork 的协作定位：Agent 面向用户承担需求理解、材料准备、业务推进和验收交付；BeefTV 承载双方可见的业务流程与执行结果。涉及产品方向、Agent 接入、画布呈现或业务交付时，先读 [人机协作工作台约定](docs/human-agent-workbench.md)。
+
+外部 Agent 日常创作统一通过 MCP，连接后先调用 `beeftv_get_started` 获取实时上下文与操作指南。接入、重连或诊断时读取[外部 Agent 接入](docs/agent-onboarding.md)；CLI 与 HTTP API 保留为开发维护入口。
+
 ## 2. 开始工作前
+
+首次接手本 fork、跨机器协作或整理上游贡献时，先读 [项目现状与跨机器交接](docs/fork-handoff.md)，确认完整功能分支、已验证边界及当前实例的连接方式。
 
 1. 先读取任务涉及的入口、调用方、配置、锁文件和相邻测试；先理解现状，再决定是否抽象或重构。
 2. 使用 `rg` / `rg --files` 搜索，优先并行读取相关文件。不要为了“统一风格”改动无关模块、依赖、格式或用户已有修改。

@@ -15,8 +15,8 @@ type TimelineRenderAdmission interface {
 }
 
 func registerCanvasRenderOps(r *Registry) {
-	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.timeline.render", Summary: "免费本地渲染已保存的时间线，返回任务以供查询成片；不调用付费生成", Scope: ScopeCanvas,
-		Params: json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer","minimum":0},"options":{"type":"object","properties":{"width":{"type":"integer"},"height":{"type":"integer"},"fps":{"type":"integer"},"sampleRate":{"type":"integer"},"burnSubtitles":{"type":"boolean"}}}},"required":["canvasId","expectedRevision"]}`), Handler: opCanvasTimelineRender})
+	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.timeline.render", Summary: "免费本地导出已保存的时间线：MP4 成片、WAV/MP3 音频或两张图片的 PNG/JPEG 联系表；不调用付费生成", Scope: ScopeCanvas,
+		Params: json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer","minimum":0},"options":{"type":"object","properties":{"width":{"type":"integer"},"height":{"type":"integer"},"fps":{"type":"integer"},"sampleRate":{"type":"integer"},"burnSubtitles":{"type":"boolean"},"output":{"type":"string","enum":["video","audio","image"]},"format":{"type":"string","enum":["mp4","wav","mp3","png","jpeg"]}},"description":"output+format 必须匹配：video/mp4、audio/wav、audio/mp3、image/png、image/jpeg。audio 只导出音频片段；image 需要正好两张静态图片。"}},"required":["canvasId","expectedRevision"]}`), Handler: opCanvasTimelineRender})
 }
 
 func opCanvasTimelineRender(ctx *Context, raw json.RawMessage) (any, error) {

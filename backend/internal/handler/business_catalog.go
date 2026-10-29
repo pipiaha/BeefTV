@@ -50,7 +50,7 @@ func businessRouteAllowed(method, p string) bool {
 			return false
 		}
 	}
-	for _, prefix := range []string{"/assets", "/asset-folders", "/resources", "/canvas-projects", "/canvas-folders", "/projects", "/project-folders", "/voice-profiles", "/style-profiles", "/tasks", "/timeline", "/depth-captures", "/creation-runs", "/creation-conversations", "/skills", "/plugins", "/runninghub", "/settings/prompt-templates"} {
+	for _, prefix := range []string{"/assets", "/asset-folders", "/resources", "/canvas-projects", "/canvas-folders", "/projects", "/project-folders", "/voice-profiles", "/style-profiles", "/tasks", "/timeline", "/depth-captures", "/creation-runs", "/creation-conversations", "/configured-providers", "/skills", "/plugins", "/runninghub", "/settings/prompt-templates"} {
 		if p == prefix || strings.HasPrefix(p, prefix+"/") {
 			return true
 		}
@@ -65,7 +65,8 @@ func NewBusinessCatalog(routes gin.RoutesInfo) *BusinessCatalog {
 		if !strings.HasPrefix(route.Path, "/api/") || !businessRouteAllowed(route.Method, p) {
 			continue
 		}
-		readOnly := route.Method == http.MethodGet || p == "/timeline/render-plan"
+		readOnly := route.Method == http.MethodGet || p == "/timeline/render-plan" ||
+			(route.Method == http.MethodPost && p == "/configured-providers/comfyui/inspect")
 		properties := map[string]any{"path": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}, "query": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}, "body": map[string]any{"type": "object", "additionalProperties": true}}
 		pathProperties := map[string]any{}
 		required := []string{}

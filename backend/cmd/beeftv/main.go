@@ -82,6 +82,7 @@ type client struct {
 	token        string
 	ownerToken   string
 	desktopToken string
+	readOnly     bool
 	http         *http.Client
 }
 
@@ -252,11 +253,16 @@ func (c *client) listOpsCtx(ctx context.Context, readOnly bool) ([]opDescriptor,
 		return nil, err
 	}
 	var payload struct {
-		Ops []opDescriptor `json:"ops"`
+		Ops      []opDescriptor `json:"ops"`
+		ReadOnly bool           `json:"readOnly"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, &cliError{code: exitInternal, reason: "invalid_ops_payload", msg: err.Error()}
 	}
+	c.mu.Lock()
+	c.readOnly = payload.ReadOnly
+	c.mu.Unlock()
+	readOnly = readOnly || payload.ReadOnly
 	if !readOnly {
 		return payload.Ops, nil
 	}
@@ -403,6 +409,7 @@ func usage() {
   beeftv task get --task <id> [--json]
   beeftv client register --label <label> [--kind codex|claude|cursor|other] [--mode read-only|read-write]
   beeftv mcp serve [--read-only]
+  beeftv mcp doctor [--json]
 
 连接哪个工作区：不设 BEEFTV_BASE_URL 时自动连正在运行的 BeefTV 桌面应用，端口是动态的。
 BEEFTV_DATA_DIR 可以指向非默认数据目录。Windows 从用户目录下 .beeftv/runtime 读取对应
@@ -687,8 +694,11 @@ func runClient(c *client, args []string) error {
 }
 
 func runMCP(c *client, args []string) error {
+	if len(args) > 0 && args[0] == "doctor" {
+		return runMCPDoctor(args[1:])
+	}
 	if len(args) == 0 || args[0] != "serve" {
-		return &cliError{code: exitUsage, reason: "missing_subcommand", msg: "mcp 需要 serve"}
+		return &cliError{code: exitUsage, reason: "missing_subcommand", msg: "mcp 需要 serve 或 doctor"}
 	}
 	fs := flag.NewFlagSet("mcp serve", flag.ContinueOnError)
 	readOnly := fs.Bool("read-only", false, "只暴露只读工具")
@@ -707,8 +717,11 @@ func runMCP(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	server := mcp.NewServer(&mcp.Implementation{Name: "beeftv", Version: "1.0.0"}, nil)
-	registeredTools := len(ops)
+	c.mu.Lock()
+	*readOnly = *readOnly || c.readOnly
+	c.mu.Unlock()
+	server := mcp.NewServer(&mcp.Implementation{Name: "beeftv", Version: "1.1.0"}, &mcp.ServerOptions{Instructions: agentInstructions})
+	registeredTools := len(ops) + 1
 	business, businessErr := c.businessTools(ctx)
 	if businessErr != nil {
 		var unavailable *cliError
@@ -723,6 +736,7 @@ func runMCP(c *client, args []string) error {
 			}
 		}
 	}
+	registerOnboardingMCP(server, c, business, *readOnly)
 	for _, op := range ops {
 		descriptor := op
 		server.AddTool(&mcp.Tool{Name: descriptor.ID, Description: descriptor.Summary, InputSchema: descriptor.Params,

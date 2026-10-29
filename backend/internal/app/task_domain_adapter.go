@@ -92,9 +92,11 @@ func (a taskCatalogAdapter) Select(userID string, req localtask.SelectRequest) (
 		}
 	}
 	if modelcatalog.TaskInputUsesWorkflowProvider(input) {
-		config, _ := input["config"].(map[string]any)
-		if err := a.s.RequireWorkflowPluginForUser(userID, strings.TrimSpace(fmt.Sprint(config["interfaceType"]))); err != nil {
-			return localtask.SelectResult{}, err
+		if !modelcatalog.TaskInputUsesNativeComfyProvider(input) {
+			config, _ := input["config"].(map[string]any)
+			if err := a.s.RequireWorkflowPluginForUser(userID, strings.TrimSpace(fmt.Sprint(config["interfaceType"]))); err != nil {
+				return localtask.SelectResult{}, err
+			}
 		}
 		return localtask.SelectResult{Input: input, Workflow: true}, nil
 	}

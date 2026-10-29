@@ -1,0 +1,47 @@
+.model-service-drawer .ant-drawer-section {
+    background: var(--surface);
+    color: var(--foreground);
+}
+.model-service-drawer .ant-drawer-content-wrapper {
+    max-width: 100vw;
+}
+.model-service-drawer .ant-drawer-body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.model-service-drawer .ant-drawer-header {
+    padding: 18px 24px;
+}
+.model-service-drawer .service-type-label {
+    font-size: 12px;
+    color: var(--muted-foreground);
+}
+.model-service-drawer .service-type-field {
+    flex-shrink: 0;
+    padding: 18px 24px 0;
+    border-bottom: 1px solid var(--workspace-border);
+}
+.model-service-drawer .service-type-field .ant-form-item {
+    margin-bottom: 18px;
+}
+.model-service-drawer .service-type-field .ant-select {
+    max-width: 300px;
+}
+.model-service-drawer .service-type-field .ant-form-item-label > label {
+    font-size: 12px;
+}
+@media (max-width: 767px) {
+    .model-service-drawer .ant-drawer-header {
+        padding: 16px;
+    }
+    .model-service-drawer .service-type-field {
+        padding: 14px 16px 0;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .model-service-drawer * {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}

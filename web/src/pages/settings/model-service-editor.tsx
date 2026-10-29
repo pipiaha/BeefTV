@@ -7,8 +7,9 @@ import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/chann
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image-models";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
-import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, isTopazUpscaleChannel, modelCatalogRequestURL, serviceConnectionError, serviceModelProfile, servicePresetFor, type ModelServicePresetId } from "@/lib/model-service-presets";
+import { MODEL_SERVICE_PRESETS, isTopazUpscaleChannel, modelCatalogRequestURL, serviceConnectionError, serviceModelProfile, servicePresetFor, type ModelServicePresetId } from "@/lib/model-service-presets";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
+import { MODEL_USAGE_LABELS, MODEL_USAGE_ORDER, modelUsageCapability, profileMatchesUsage, profileUsageLabel, withProfileUsage, type ModelUsage } from "@/lib/model-settings-catalog";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
 import { seedancePortraitLabel } from "@/lib/seedance-portrait";
 import { createModelChannel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
@@ -17,10 +18,19 @@ import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores
 import "./model-service-editor.css";
 import { getTransportFailureKind } from "@/services/api/request";
 
-export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: ModelChannel; onClose: () => void; onSave: (channel: ModelChannel) => Promise<void> }) {
+export function ModelServiceEditor({ initial, initialCapability, initialUsage = initialCapability || "all", embedded = false, onClose, onSave, onDraftChange, onBusyChange }: {
+    initial?: ModelChannel;
+    initialCapability?: ModelCapability;
+    initialUsage?: ModelUsage;
+    embedded?: boolean;
+    onClose: () => void;
+    onSave: (channel: ModelChannel) => Promise<void>;
+    onDraftChange?: (channel: ModelChannel) => void;
+    onBusyChange?: (busy: boolean) => void;
+}) {
     const [draft, setDraft] = useState<ModelChannel>(() => initial ? structuredClone(initial) : { ...createModelChannel(), name: "", baseUrl: "" });
     const [presetId, setPresetId] = useState<ModelServicePresetId>(() => initial ? servicePresetFor(initial) : "compatible");
-    const [step, setStep] = useState(initial ? 1 : 0);
+    const [step, setStep] = useState(initial?.models.length ? 1 : 0);
     const [advanced, setAdvanced] = useState(false);
     const [catalog, setCatalog] = useState<ChannelModelCatalogItem[]>(() => (initial?.models || []).map((id) => ({ id })));
     const [catalogRead, setCatalogRead] = useState(false);
@@ -32,13 +42,13 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
     const [query, setQuery] = useState("");
-    const [filter, setFilter] = useState("all");
+    const [filter, setFilter] = useState<ModelUsage>(initialUsage);
     const [manualName, setManualName] = useState("");
     // 目录读不到时只能手填模型 ID，类型由用户自己选：默认选「文本」会让
     // doubao-seedance-2.5 这类视频模型按文本存下来，而模型名猜类型被评审否掉了
     // （qwen3-omni-flash 就是文本模型）。每加一个模型都重新选一次，避免上一次的
     // 视频类型被悄悄带到下一个文本模型上。
-    const [manualCapability, setManualCapability] = useState<ModelCapability>();
+    const [manualUsage, setManualUsage] = useState<ModelUsage>();
     const [editingCapabilities, setEditingCapabilities] = useState(false);
     const alive = useRef(true);
     const receipts = useModelConnectionTests((state) => state.receipts);
@@ -62,6 +72,9 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     useEffect(() => {
         if (credential.secretKeyRequired) setAdvanced(true);
     }, [credential.secretKeyRequired]);
+
+    useEffect(() => { onDraftChange?.(draft); }, [draft, onDraftChange]);
+    useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
 
     const patch = (value: Partial<ModelChannel>) => {
         setDraft((current) => ({ ...current, ...value }));
@@ -136,17 +149,19 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     const addManual = () => {
         const id = manualName.trim();
         if (!id) return;
-        if (!manualCapability) { setError("请先选择模型类型，再点「添加」"); return; }
+        if (!manualUsage) { setError("请先选择模型用途，再点「添加」"); return; }
+        const capability = modelUsageCapability(manualUsage);
+        if (!capability) return;
         if (draft.models.includes(id)) { setError("这个模型已在列表中"); return; }
-        const profile = serviceModelProfile(draft, { id }, protocols, manualCapability);
+        const profile = withProfileUsage(serviceModelProfile(draft, { id }, protocols, capability), manualUsage);
         if (!profile.protocol) {
             setNotice("请在高级模型设置中，为这个模型选择服务商要求的请求协议。");
             setEditingCapabilities(true);
         }
-        setCatalog((current) => current.some((item) => item.id === id) ? current : [...current, { id, modelType: manualCapability }]);
+        setCatalog((current) => current.some((item) => item.id === id) ? current : [...current, { id, modelType: capability }]);
         setDraft((current) => ({ ...current, models: [...current.models, id], modelProfiles: [...(current.modelProfiles || []).filter((p) => p.model !== id), profile] }));
         setManualName("");
-        setManualCapability(undefined);
+        setManualUsage(undefined);
         setError("");
     };
     const save = async () => {
@@ -169,7 +184,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     };
     const visibleModels = catalog.filter((item) => {
         const profile = serviceModelProfile(draft, item, protocols);
-        return `${item.id} ${seedancePortraitLabel(item.id) || item.displayName || ""}`.toLowerCase().includes(query.toLowerCase()) && (filter === "all" || profile.capability === filter);
+        return `${item.id} ${seedancePortraitLabel(item.id) || item.displayName || ""}`.toLowerCase().includes(query.toLowerCase()) && profileMatchesUsage(profile, filter);
     });
     if (isTopazUpscaleChannel(draft)) return <AppModal open centered width={520} title="fal · Topaz 专用超分" footer={null} closable={!saving} keyboard={!saving} mask={{ closable: false }} onCancel={onClose}>
         <Form layout="vertical" requiredMark={false} disabled={saving} className="pt-2" onFinish={() => void save()}>
@@ -184,17 +199,17 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     </AppModal>;
     const selectedPreset = MODEL_SERVICE_PRESETS.find((item) => item.id === presetId)!;
 
-    return <AppModal open centered width={1000} flush footer={null} title={null} closable={!saving} keyboard={!saving} mask={{ closable: false }} onCancel={() => { catalogRequest.current?.abort(); onClose(); }} rootClassName="model-service-modal">
-        <div className="model-service-header">
+    const editor = <>
+        {!embedded && <div className="model-service-header">
             <h2>{initial ? `管理 ${initial.name}` : "连接你的模型服务"}</h2>
             <ol className="model-service-steps" aria-label="接入步骤">
                 <li aria-current={step === 0 ? "step" : undefined}><span>{step > 0 ? <Check size={13} /> : "1"}</span>连接服务</li>
                 <li aria-current={step === 1 ? "step" : undefined}><span>2</span>选择模型</li>
             </ol>
-        </div>
-        <div className="model-service-body" aria-busy={busy} inert={busy}>
+        </div>}
+        <div className={"model-service-body" + (embedded ? " model-service-body-embedded" : "")} aria-busy={busy} inert={busy}>
             {step === 0 ? <div className="model-service-connection">
-                <aside className="model-service-providers" aria-label="选择服务商">
+                {!embedded && <aside className="model-service-providers" aria-label="选择服务商">
                     <p className="model-service-label">选择服务商</p>
                     {MODEL_SERVICE_PRESETS.map((preset) => <button key={preset.id} type="button" disabled={busy || Boolean(initial)} aria-pressed={presetId === preset.id} className="model-service-provider" onClick={() => choosePreset(preset.id)}>
                         <ModelLogo icon={preset.icon} size={24} />
@@ -202,7 +217,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                         {presetId === preset.id && <Check size={15} />}
                     </button>)}
                     <div className="model-service-note"><ShieldCheck size={16} /><p>密钥保存在这台设备上。<br />生成费用由服务商结算。</p></div>
-                </aside>
+                </aside>}
                 <Form layout="vertical" requiredMark={false} className="model-service-fields" disabled={busy} onFinish={() => void fetchModels()}>
                     <div className="model-service-form-title"><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，但是 BeefTV 无法确保所有第三方模型服务的兼容性</p>}</div></div>
                     <Form.Item label="连接名称"><Input aria-label="连接名称" placeholder="例如：我的创作账号" value={draft.name} onChange={(event) => patch({ name: event.target.value })} /></Form.Item>
@@ -220,16 +235,16 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
             </div> : <div className="model-service-models">
                 <div className="model-service-catalog-header"><div><h3>选择你要使用的模型</h3><p>{draft.name || "我的模型服务"} · {catalogRead ? "目录已读取" : "支持手动添加模型"}</p></div><Button icon={<Search size={14} />} loading={busy} disabled={protocolLoading} onClick={() => void fetchModels()}>读取模型</Button></div>
                 <Input aria-label="搜索模型" prefix={<Search size={16} />} placeholder="搜索模型名称" value={query} onChange={(event) => setQuery(event.target.value)} allowClear />
-                <div className="model-service-filter"><Segmented value={filter} onChange={(value) => setFilter(String(value))} options={[{ label: "全部", value: "all" }, ...Object.entries(CAPABILITY_LABELS).map(([value, label]) => ({ value, label }))]} /><span>已选 {draft.models.length} 个</span></div>
+                <div className="model-service-filter"><Segmented value={filter} onChange={(value) => setFilter(value as ModelUsage)} options={MODEL_USAGE_ORDER.map((value) => ({ value, label: MODEL_USAGE_LABELS[value] }))} /><span>已选 {draft.models.length} 个</span></div>
                 <div className="model-service-catalog">
                     {protocolLoading ? <Spin /> : visibleModels.length ? visibleModels.map((item) => {
                         const profile = serviceModelProfile(draft, item, protocols);
                         const receipt = currentModelConnectionReceipt(receipts, draft, item.id);
                         const displayName = seedancePortraitLabel(item.id) || item.displayName || item.id;
-                        return <label key={item.id} className="model-service-model"><Checkbox disabled={busy} checked={draft.models.includes(item.id)} onChange={(event) => toggleModel(item.id, event.target.checked)} /><span><strong>{displayName}</strong>{displayName !== item.id && <small>{item.id}</small>}</span><span className="model-service-kind">{CAPABILITY_LABELS[profile.capability]}</span><small title={receipt?.detail}>{receipt ? receipt.success ? "测试通过" : "测试失败" : "未测试"}</small></label>;
+                        return <label key={item.id} className="model-service-model"><Checkbox disabled={busy} checked={draft.models.includes(item.id)} onChange={(event) => toggleModel(item.id, event.target.checked)} /><span><strong>{displayName}</strong>{displayName !== item.id && <small>{item.id}</small>}</span><span className="model-service-kind">{profileUsageLabel(profile)}</span><small title={receipt?.detail}>{receipt ? receipt.success ? "测试通过" : "测试失败" : "未测试"}</small></label>;
                     }) : <div className="model-service-empty"><Search size={23} /><strong>{query ? "没有找到匹配的模型" : "添加你的第一个模型"}</strong><p>{query ? "换个关键词，或在下方手动添加。" : "读取服务商的模型目录，或填写准确的模型 ID。"}</p></div>}
                 </div>
-                <div className="model-service-manual"><Input aria-label="模型 ID" placeholder="手动输入模型 ID" value={manualName} disabled={busy} onChange={(event) => setManualName(event.target.value)} onPressEnter={addManual} /><Select aria-label="模型类型" placeholder="选择类型" value={manualCapability} disabled={busy} onChange={setManualCapability} options={Object.entries(CAPABILITY_LABELS).map(([value, label]) => ({ value, label }))} /><Button disabled={busy || protocolLoading || !manualName.trim()} onClick={addManual}>添加</Button></div>
+                <div className="model-service-manual"><Input aria-label="模型 ID" placeholder="手动输入模型 ID" value={manualName} disabled={busy} onChange={(event) => setManualName(event.target.value)} onPressEnter={addManual} /><Select aria-label="模型用途" placeholder="选择用途" value={manualUsage} disabled={busy} onChange={setManualUsage} options={MODEL_USAGE_ORDER.filter((value) => value !== "all").map((value) => ({ value, label: MODEL_USAGE_LABELS[value] }))} /><Button disabled={busy || protocolLoading || !manualName.trim()} onClick={addManual}>添加</Button></div>
                 {draft.models.length > 0 && <><button type="button" className="model-service-advanced" aria-expanded={editingCapabilities} onClick={() => setEditingCapabilities(!editingCapabilities)}><Settings2 size={15} />高级模型设置与测试<ChevronDown size={14} /></button>{editingCapabilities && <ChannelModelSettings draft channel={draft} onChange={(modelProfiles) => setDraft((current) => ({ ...current, modelProfiles }))} />}</>}
             </div>}
         </div>
@@ -242,5 +257,6 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         <div className="model-service-footer">{step === 1 && <span>保存后，可在创作页选择这些模型</span>}<div>
             {step === 0 ? <><Button disabled={busy} onClick={() => { if (validateConnection(false)) { setNotice(""); setStep(1); } }}>手动添加模型</Button><Button type="primary" loading={busy} disabled={protocolLoading} onClick={() => void fetchModels()}>读取模型</Button></> : <><Button disabled={busy} icon={<ArrowLeft size={15} />} onClick={() => { setStep(0); setError(""); }}>连接信息</Button><Button type="primary" loading={busy} disabled={!draft.models.length || protocolLoading} icon={<Check size={15} />} onClick={() => void save()}>保存并使用</Button></>}
         </div></div>
-    </AppModal>;
+    </>;
+    return embedded ? editor : <AppModal open centered width={1000} flush footer={null} title={null} closable={!saving} keyboard={!saving} mask={{ closable: false }} onCancel={() => { catalogRequest.current?.abort(); onClose(); }} rootClassName="model-service-modal">{editor}</AppModal>;
 }

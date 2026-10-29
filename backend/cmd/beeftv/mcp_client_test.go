@@ -64,8 +64,15 @@ func TestMCPClientLoop(t *testing.T) {
 	if discoveryErr != nil {
 		t.Fatal(discoveryErr)
 	}
-	if len(tools.Tools) != len(expected)+len(business) {
+	if len(tools.Tools) != len(expected)+len(business)+1 {
 		t.Fatalf("MCP tools = %d, workspace operations = %d, business handlers = %d", len(tools.Tools), len(expected), len(business))
+	}
+	if !strings.Contains(session.InitializeResult().Instructions, "beeftv_get_started") {
+		t.Fatal("MCP handshake must tell a new agent where to start")
+	}
+	started, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "beeftv_get_started", Arguments: map[string]any{}})
+	if err != nil || started.IsError || !toolTextContains(started, `"contractVersion":1`) || !toolTextContains(started, "business_post_tasks") {
+		t.Fatalf("new agent onboarding failed: result=%+v err=%v", started, err)
 	}
 	for _, operation := range expected {
 		found := false

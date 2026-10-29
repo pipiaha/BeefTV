@@ -71,8 +71,18 @@ func RegisterAgentClientRoutes(r gin.IRouter, svc *app.Service, clients *agentop
 			return
 		}
 		// token 只在这一次响应里出现；服务端只保存哈希，之后任何接口都取不回来。
+		baseURL := ""
+		if desktopTrust == nil {
+			// Server workspaces do not write desktop runtime discovery files.
+			// Registration already verified this request's loopback host/origin.
+			scheme := "http"
+			if c.Request.TLS != nil {
+				scheme = "https"
+			}
+			baseURL = scheme + "://" + c.Request.Host + "/api"
+		}
 		ok(c, gin.H{"client": clientView(reg), "token": token,
-			"setup": clientSetup(kind, cliPath, dataDir, reg, token)})
+			"setup": clientSetup(kind, cliPath, dataDir, reg, token, baseURL)})
 	})
 
 	r.DELETE("/agent-clients/:id", func(c *gin.Context) {
@@ -177,43 +187,51 @@ func cliInstallCommand(cliPath string) string {
 
 // clientSetup 生成可直接粘贴的接入配置。命令里带的是客户端自己的凭据，
 // 不含桌面启动令牌；CLI 按工作区路径通过共享运行实例发现逻辑读取地址。
-func clientSetup(kind agentops.ClientKind, cliPath, dataDir string, reg agentops.ClientRegistration, token string) gin.H {
+func clientSetup(kind agentops.ClientKind, cliPath, dataDir string, reg agentops.ClientRegistration, token, baseURL string) gin.H {
 	serveArgs := []string{"mcp", "serve"}
 	if reg.Mode == agentops.ClientReadOnly {
 		serveArgs = append(serveArgs, "--read-only")
+	}
+	environment := map[string]string{"BEEFTV_DATA_DIR": dataDir, "BEEFTV_CLIENT_ID": reg.ID, "BEEFTV_CLIENT_TOKEN": token}
+	if baseURL != "" {
+		environment["BEEFTV_BASE_URL"] = baseURL
+	}
+	baseFlag := ""
+	if baseURL != "" {
+		baseFlag = " --env BEEFTV_BASE_URL=" + shellQuote(baseURL)
 	}
 	switch kind {
 	case agentops.ClientKindCodex:
 		command := "codex mcp add beeftv" +
 			" --env BEEFTV_DATA_DIR=" + shellQuote(dataDir) +
 			" --env BEEFTV_CLIENT_ID=" + shellQuote(reg.ID) +
-			" --env BEEFTV_CLIENT_TOKEN=" + shellQuote(token) +
+			" --env BEEFTV_CLIENT_TOKEN=" + shellQuote(token) + baseFlag +
 			" -- " + shellQuote(cliPath) + " " + strings.Join(serveArgs, " ")
 		return gin.H{"kind": string(kind), "title": "在 Codex 里加上 BeefTV", "command": command}
 	case agentops.ClientKindClaude:
 		command := "claude mcp add beeftv" +
 			" -e BEEFTV_DATA_DIR=" + shellQuote(dataDir) +
 			" -e BEEFTV_CLIENT_ID=" + shellQuote(reg.ID) +
-			" -e BEEFTV_CLIENT_TOKEN=" + shellQuote(token) +
+			" -e BEEFTV_CLIENT_TOKEN=" + shellQuote(token) + strings.ReplaceAll(baseFlag, " --env ", " -e ") +
 			" -- " + shellQuote(cliPath) + " " + strings.Join(serveArgs, " ")
 		return gin.H{"kind": string(kind), "title": "在 Claude Code 里加上 BeefTV", "command": command}
 	case agentops.ClientKindClaudeDesktop:
 		return gin.H{"kind": string(kind), "title": "在 Claude Desktop 的开发者设置中编辑配置",
-			"json": mcpServersJSON(cliPath, dataDir, serveArgs, reg.ID, token)}
+			"json": mcpServersJSON(cliPath, serveArgs, environment)}
 	case agentops.ClientKindCursor:
 		return gin.H{"kind": string(kind), "title": "把这段写进 ~/.cursor/mcp.json",
-			"json": mcpServersJSON(cliPath, dataDir, serveArgs, reg.ID, token)}
+			"json": mcpServersJSON(cliPath, serveArgs, environment)}
 	default:
 		return gin.H{"kind": string(kind), "title": "把这段写进该客户端的 MCP 配置",
-			"json": mcpServersJSON(cliPath, dataDir, serveArgs, reg.ID, token)}
+			"json": mcpServersJSON(cliPath, serveArgs, environment)}
 	}
 }
 
-func mcpServersJSON(cliPath, dataDir string, args []string, clientID, token string) string {
+func mcpServersJSON(cliPath string, args []string, environment map[string]string) string {
 	payload := map[string]any{"mcpServers": map[string]any{"beeftv": map[string]any{
 		"command": cliPath,
 		"args":    args,
-		"env":     map[string]string{"BEEFTV_DATA_DIR": dataDir, "BEEFTV_CLIENT_ID": clientID, "BEEFTV_CLIENT_TOKEN": token},
+		"env":     environment,
 	}}}
 	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

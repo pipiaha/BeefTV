@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"infinite-canvas/backend/internal/model"
+	"infinite-canvas/backend/internal/provider/workflow"
 	"infinite-canvas/backend/internal/repository"
 )
 
@@ -88,8 +89,14 @@ func (s *Service) requestProviderCancellation(ctx context.Context, task *model.T
 	requestTask := *task
 	requestTask.InputJSON = mustJSON(input)
 	requestCtx = withProviderRequestKind(withProviderAnalytics(requestCtx, s, requestTask), "cancel")
-	if err := cancelProviderTask(requestCtx, input.Config, task.ProviderRequestID); err != nil {
+	if err := s.cancelProviderTask(requestCtx, input.Config, task.ProviderRequestID); err != nil {
 		return s.markProviderCancellationUncertain(task, providerCancellationUncertainMessage("上游取消请求结果不明确")+"："+safeProviderLogError(err))
+	}
+	if workflow.IsNativeComfyInterface(input.Config.InterfaceType) {
+		// Native cancellation verifies the exact prompt is gone before returning.
+		// Deleted queued prompts never produce a history entry to reconcile later.
+		now := time.Now()
+		return s.repo.UpdateTaskProviderCancellation(task.ID, model.ProviderCancelStatusRequested, model.ProviderCancelStatusConfirmed, "", nil, &now)
 	}
 	_ = s.log(task.UserID, task.ID, "info", "已请求上游取消，等待供应商确认", task.ProviderRequestID)
 	return nil
@@ -106,7 +113,7 @@ func (s *Service) reconcileProviderCancellation(ctx context.Context, task *model
 	queryTask := *task
 	queryTask.InputJSON = mustJSON(input)
 	queryCtx := withProviderRequestKind(withProviderAnalytics(ctx, s, queryTask), "cancel-query")
-	outcome, providerStatus, err := queryProviderCancellation(queryCtx, input.Config, task.ProviderRequestID)
+	outcome, providerStatus, err := s.queryProviderCancellation(queryCtx, input.Config, task.ProviderRequestID)
 	if err != nil {
 		if task.ProviderCancelAttempts >= providerCancellationMaxAttempts-1 {
 			return s.markProviderCancellationUncertain(task, providerCancellationUncertainMessage("连续查询上游取消状态失败")+"："+safeProviderLogError(err))
@@ -177,10 +184,12 @@ func (s *Service) providerCancellationInput(task *model.Task) (canvasGenerationI
 }
 
 func supportsProviderCancellation(interfaceType string) bool {
-	return interfaceType == string(model.ChannelInterfaceGeminiVeo) || model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(interfaceType))
+	return interfaceType == string(model.ChannelInterfaceGeminiVeo) ||
+		model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(interfaceType)) ||
+		workflow.IsNativeComfyInterface(interfaceType)
 }
 
-func cancelProviderTask(ctx context.Context, config providerConfig, providerRequestID string) error {
+func (s *Service) cancelProviderTask(ctx context.Context, config providerConfig, providerRequestID string) error {
 	if generation.UpscaleMediaType(config.Model) != "" {
 		return generation.CancelUpscale(ctx, config, providerRequestID)
 	}
@@ -191,6 +200,8 @@ func cancelProviderTask(ctx context.Context, config providerConfig, providerRequ
 	case model.IsVolcengineArkVideoProtocol(model.ChannelInterfaceType(config.InterfaceType)):
 		path := "/contents/generations/tasks/" + url.PathEscape(providerRequestID)
 		return deleteProviderTask(ctx, config, path)
+	case workflow.IsNativeComfyInterface(config.InterfaceType):
+		return s.workflowClient(nil).CancelNativeComfy(ctx, workflowConfigFromProvider(config), providerRequestID)
 	default:
 		return errors.New("当前上游协议不支持取消")
 	}
@@ -213,7 +224,7 @@ func deleteProviderTask(ctx context.Context, config providerConfig, path string)
 	return nil
 }
 
-func queryProviderCancellation(ctx context.Context, config providerConfig, providerRequestID string) (providerCancellationOutcome, string, error) {
+func (s *Service) queryProviderCancellation(ctx context.Context, config providerConfig, providerRequestID string) (providerCancellationOutcome, string, error) {
 	if generation.UpscaleMediaType(config.Model) != "" {
 		status, err := generation.QueryUpscaleStatus(ctx, config, providerRequestID)
 		if err != nil {
@@ -270,6 +281,21 @@ func queryProviderCancellation(ctx context.Context, config providerConfig, provi
 			return providerCancellationPending, status, nil
 		default:
 			return providerCancellationPending, firstNonEmpty(status, "unknown"), nil
+		}
+	case workflow.IsNativeComfyInterface(config.InterfaceType):
+		status, err := s.workflowClient(nil).NativeComfyCancellationState(ctx, workflowConfigFromProvider(config), providerRequestID)
+		if err != nil {
+			return "", "", err
+		}
+		switch status {
+		case "cancelled", "canceled":
+			return providerCancellationConfirmed, status, nil
+		case "failed", "error":
+			return providerCancellationFailed, status, nil
+		case "succeeded":
+			return providerCancellationSucceeded, status, nil
+		default:
+			return providerCancellationPending, status, nil
 		}
 	default:
 		return "", "", errors.New("当前上游协议不支持取消状态查询")

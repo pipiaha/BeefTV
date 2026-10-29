@@ -493,6 +493,198 @@ exit 0`, ffmpeg)
 	}
 }
 
+func TestRendererTypedLocalExports(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg required")
+	}
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("ffmpeg %v: %v\n%s", args, err, out)
+		}
+	}
+
+	t.Run("default-mp4", func(t *testing.T) {
+		run("-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x32:r=24:d=1", "-f", "lavfi", "-i", "sine=frequency=320:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "source.mp4")
+		opts := DefaultOptions()
+		opts.Width, opts.Height = 64, 32
+		plan, err := Compile(Project{Version: 2, DurationMs: 1000, Tracks: []Track{{ID: "v"}}, Clips: []Clip{clip("v", KindVideo, "v", 0, 1000, "resource:src")}}, nil, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rendered, cleanup, err := (&Renderer{Sources: fileSources{"src": filepath.Join(dir, "source.mp4")}}).Render(ctx, plan, nil)
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rendered.Kind != KindVideo || rendered.MimeType != "video/mp4" || rendered.FileName != "timeline-render.mp4" || rendered.Width != 64 || rendered.Height != 32 {
+			t.Fatalf("rendered=%+v", rendered)
+		}
+		facts, err := Probe(ctx, rendered.Path)
+		if err != nil || !facts.HasVideo || !facts.HasAudio || facts.DurationMs < 900 || facts.DurationMs > 1100 {
+			t.Fatalf("probe=%+v err=%v", facts, err)
+		}
+	})
+
+	for _, tc := range []struct {
+		format string
+		mime   string
+		name   string
+	}{{FormatWAV, "audio/wav", "timeline-render.wav"}, {FormatMP3, "audio/mpeg", "timeline-render.mp3"}} {
+		t.Run("audio-"+tc.format, func(t *testing.T) {
+			run("-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "first.wav")
+			run("-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=880:duration=1", "second.wav")
+			opts := DefaultOptions()
+			opts.Output, opts.Format = OutputAudio, tc.format
+			project := Project{Version: 2, Tracks: []Track{{ID: "a"}}, Clips: []Clip{
+				clip("first", KindAudio, "a", 0, 600, "resource:first"),
+				clip("second", KindAudio, "a", 600, 400, "resource:second"),
+			}}
+			plan, err := Compile(project, nil, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.DurationMs != 1000 || len(plan.Segments) != 0 {
+				t.Fatalf("audio plan duration=%d segments=%+v", plan.DurationMs, plan.Segments)
+			}
+			rendered, cleanup, err := (&Renderer{Sources: fileSources{"first": filepath.Join(dir, "first.wav"), "second": filepath.Join(dir, "second.wav")}}).Render(ctx, plan, nil)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rendered.Kind != KindAudio || rendered.MimeType != tc.mime || rendered.FileName != tc.name || rendered.Width != 0 || rendered.Height != 0 {
+				t.Fatalf("rendered=%+v", rendered)
+			}
+			facts, err := Probe(ctx, rendered.Path)
+			if err != nil || !facts.HasAudio || facts.HasVideo || facts.DurationMs < 900 || facts.DurationMs > 1100 {
+				t.Fatalf("probe=%+v err=%v", facts, err)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		format string
+		mime   string
+		name   string
+	}{{FormatPNG, "image/png", "contact-sheet.png"}, {FormatJPEG, "image/jpeg", "contact-sheet.jpg"}} {
+		t.Run("image-"+tc.format, func(t *testing.T) {
+			run("-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x32", "-frames:v", "1", "red.png")
+			run("-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=32x64", "-frames:v", "1", "blue.png")
+			opts := DefaultOptions()
+			opts.Output, opts.Format, opts.Width, opts.Height = OutputImage, tc.format, 128, 64
+			project := Project{Version: 2, DurationMs: 2000, Tracks: []Track{{ID: "images"}}, Clips: []Clip{
+				clip("red", KindImage, "images", 0, 1000, "resource:red"),
+				clip("blue", KindImage, "images", 1000, 1000, "resource:blue"),
+			}}
+			plan, err := Compile(project, nil, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered, cleanup, err := (&Renderer{Sources: fileSources{"red": filepath.Join(dir, "red.png"), "blue": filepath.Join(dir, "blue.png")}}).Render(ctx, plan, nil)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rendered.Kind != KindImage || rendered.MimeType != tc.mime || rendered.FileName != tc.name || rendered.Width != 128 || rendered.Height != 64 || rendered.DurationMs != 0 {
+				t.Fatalf("rendered=%+v", rendered)
+			}
+			facts, err := Probe(ctx, rendered.Path)
+			if err != nil || !facts.HasVideo || facts.HasAudio {
+				t.Fatalf("probe=%+v err=%v", facts, err)
+			}
+			width, height, err := probeDimensions(ctx, rendered.Path)
+			if err != nil || width != 128 || height != 64 {
+				t.Fatalf("dimensions=%dx%d err=%v", width, height, err)
+			}
+			raw := exec.CommandContext(ctx, "ffmpeg", "-v", "error", "-i", rendered.Path, "-f", "rawvideo", "-pix_fmt", "rgb24", "-")
+			pixels, err := raw.Output()
+			if err != nil || len(pixels) != 128*64*3 {
+				t.Fatalf("raw pixels=%d err=%v", len(pixels), err)
+			}
+			pixel := func(x, y int) []byte { return pixels[(y*128+x)*3 : (y*128+x)*3+3] }
+			for _, point := range [][2]int{{0, 0}, {127, 0}, {0, 63}, {127, 63}} {
+				if rgb := pixel(point[0], point[1]); rgb[0] < 240 || rgb[1] < 240 || rgb[2] < 240 {
+					t.Fatalf("padding pixel(%d,%d)=%v", point[0], point[1], rgb)
+				}
+			}
+			if rgb := pixel(38, 32); rgb[0] < 180 || rgb[2] > 80 {
+				t.Fatalf("left panel=%v", rgb)
+			}
+			if rgb := pixel(94, 32); rgb[2] < 180 || rgb[0] > 80 {
+				t.Fatalf("right panel=%v", rgb)
+			}
+		})
+	}
+}
+
+func TestRendererAudioOnlyOverlappingClipsMix(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+	for _, tone := range []struct{ frequency, name string }{{"440", "low.wav"}, {"880", "high.wav"}} {
+		cmd := exec.CommandContext(ctx, "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency="+tone.frequency+":duration=1", filepath.Join(dir, tone.name))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fixture: %v %s", err, out)
+		}
+	}
+	opts := DefaultOptions()
+	opts.Output, opts.Format = OutputAudio, FormatWAV
+	project := Project{Version: 2, Tracks: []Track{{ID: "a"}}, Clips: []Clip{
+		clip("low", KindAudio, "a", 0, 1000, "resource:low"),
+		clip("high", KindAudio, "a", 500, 500, "resource:high"),
+	}}
+	plan, err := Compile(project, nil, opts)
+	if err != nil || plan.DurationMs != 1000 {
+		t.Fatalf("plan=%+v err=%v", plan, err)
+	}
+	rendered, cleanup, err := (&Renderer{Sources: fileSources{
+		"low": filepath.Join(dir, "low.wav"), "high": filepath.Join(dir, "high.wav"),
+	}}).Render(ctx, plan, nil)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered.MimeType != "audio/wav" {
+		t.Fatalf("rendered=%+v", rendered)
+	}
+	facts, err := Probe(ctx, rendered.Path)
+	if err != nil || !facts.HasAudio || facts.HasVideo || facts.DurationMs < 900 || facts.DurationMs > 1100 {
+		t.Fatalf("facts=%+v err=%v", facts, err)
+	}
+}
+
+func probeDimensions(ctx context.Context, path string) (int, int, error) {
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0, err
+	}
+	var width, height int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%dx%d", &width, &height); err != nil {
+		return 0, 0, err
+	}
+	return width, height, nil
+}
+
 func parseDuration(t *testing.T, raw string) float64 {
 	t.Helper()
 	var value float64

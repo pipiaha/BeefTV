@@ -13,6 +13,7 @@ import {
     type AiConfig,
     type ModelCapability,
 } from "@/stores/use-config-store";
+import { modelUsageCapability, type ModelUsage } from "@/lib/model-settings-catalog";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 
 import { recordModelPickerChange, recordModelPickerOpenChange, recordModelPickerPress, watchModelPickerBlockers, type ModelPickerSnapshot } from "./model-settings-diagnostics";
@@ -45,7 +46,7 @@ const rows: Array<CapabilityRow | AssistantRow> = [
     { kind: "capability", id: "audio", capability: "audio", modelKey: "audioModel", title: "默认音频模型", icon: AudioLines },
 ];
 
-export function ModelDefaultGrid({ config, onChange, onOpenChannels }: { config: AiConfig; onChange: (key: DefaultModelKey, model: string) => void; onOpenChannels?: () => void }) {
+export function ModelDefaultGrid({ config, onChange, onOpenChannels, usage }: { config: AiConfig; onChange: (key: DefaultModelKey, model: string) => void; onOpenChannels?: () => void; usage?: ModelUsage }) {
     const localMode = workspaceCapabilities().local;
     const rootRef = useRef<HTMLDivElement>(null);
     useEffect(() => (rootRef.current ? watchModelPickerBlockers(rootRef.current) : undefined), []);
@@ -56,10 +57,10 @@ export function ModelDefaultGrid({ config, onChange, onOpenChannels }: { config:
     const mediaReviewOptions = mediaReviewModelOptions(config);
     return (
         <div ref={rootRef} className="model-default-settings">
-            {rows.map((row) => {
+            {rows.filter((row) => !usage || usage === "all" || (row.kind === "assistant" ? usage === "text" : row.kind === "capability" && row.capability === modelUsageCapability(usage))).map((row) => {
                 const isAssistant = row.kind === "assistant";
                 const isMediaReview = row.kind === "media-review";
-                const models = row.kind === "capability" ? filterModelsByCapability(config.models, row.capability, config.channels) : isAssistant ? assistantOptions : mediaReviewOptions;
+                const models = row.kind === "capability" ? filterModelsByCapability(config.models, row.capability, config.channels).filter((model) => resolveModelChannel(config, model).enabled !== false) : isAssistant ? assistantOptions : mediaReviewOptions;
                 const selected = isAssistant ? assistantModel : isMediaReview ? mediaReviewModel : config[row.modelKey];
                 const groups = row.kind === "capability" && row.capability === "video"
                     ? groupModelsByDisplayName(config, models)

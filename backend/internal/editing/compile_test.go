@@ -236,6 +236,65 @@ func TestCompileSharedImageGapSubFixture(t *testing.T) {
 	assertFixturePlan(t, "image-gap-sub.timeline.json", "image-gap-sub.plan.json")
 }
 
+func TestCompileTypedExportContracts(t *testing.T) {
+	project := func(clips ...Clip) Project {
+		return Project{Version: 2, DurationMs: 2000, Tracks: []Track{{ID: "media"}}, Clips: clips}
+	}
+	defaultPlan, err := Compile(project(clip("v", KindVideo, "media", 0, 1000, "resource:v")), nil, Options{Width: 64, Height: 32})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultPlan.Output.Output != OutputVideo || defaultPlan.Output.Format != FormatMP4 {
+		t.Fatalf("default output=%+v", defaultPlan.Output)
+	}
+	for _, opts := range []Options{
+		{Output: OutputVideo, Format: FormatWAV},
+		{Output: OutputAudio, Format: FormatMP4},
+		{Output: OutputAudio},
+		{Format: FormatMP3},
+	} {
+		opts.Width, opts.Height, opts.FPS, opts.SampleRate = 64, 32, 30, 44100
+		if _, err := Compile(project(clip("v", KindVideo, "media", 0, 1000, "resource:v")), nil, opts); !errors.Is(err, ErrInvalidOutput) {
+			t.Fatalf("options=%+v err=%v want ErrInvalidOutput", opts, err)
+		}
+	}
+
+	audioOpts := DefaultOptions()
+	audioOpts.Output, audioOpts.Format = OutputAudio, FormatWAV
+	audio, err := Compile(project(
+		clip("first", KindAudio, "media", 0, 600, "resource:first"),
+		clip("second", KindAudio, "media", 800, 500, "resource:second"),
+	), nil, audioOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audio.DurationMs != 1300 || len(audio.Segments) != 0 || len(audio.Audio) != 2 {
+		t.Fatalf("audio plan=%+v", audio)
+	}
+	if _, err := Compile(project(clip("v", KindVideo, "media", 0, 1000, "resource:v"), clip("a", KindAudio, "media", 0, 1000, "resource:a")), nil, audioOpts); !errors.Is(err, ErrUnsupportedKind) {
+		t.Fatalf("audio with video err=%v", err)
+	}
+
+	imageOpts := DefaultOptions()
+	imageOpts.Output, imageOpts.Format, imageOpts.Width, imageOpts.Height = OutputImage, FormatPNG, 128, 64
+	images, err := Compile(project(
+		clip("red", KindImage, "media", 0, 1000, "resource:red"),
+		clip("blue", KindImage, "media", 1000, 1000, "resource:blue"),
+	), nil, imageOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if images.Output.Output != OutputImage || images.Output.Format != FormatPNG || len(images.Audio) != 0 {
+		t.Fatalf("image plan=%+v", images)
+	}
+	if _, err := Compile(project(clip("only", KindImage, "media", 0, 1000, "resource:only")), nil, imageOpts); !errors.Is(err, ErrInvalidClip) {
+		t.Fatalf("one image err=%v", err)
+	}
+	if _, err := Compile(project(clip("v", KindVideo, "media", 0, 1000, "resource:v"), clip("i", KindImage, "media", 1000, 1000, "resource:i")), nil, imageOpts); !errors.Is(err, ErrUnsupportedKind) {
+		t.Fatalf("image with video err=%v", err)
+	}
+}
+
 func assertFixturePlan(t *testing.T, timelineName, planName string) {
 	t.Helper()
 	root := testdataRoot(t)
@@ -269,6 +328,22 @@ func assertFixturePlan(t *testing.T, timelineName, planName string) {
 	}
 	if err := json.Unmarshal(encoded, &actual); err != nil {
 		t.Fatal(err)
+	}
+	// Legacy fixtures predate typed export metadata. Default MP4 fields are
+	// forward-compatible and are omitted only in this golden comparison.
+	if actualMap, ok := actual.(map[string]any); ok {
+		if output, ok := actualMap["output"].(map[string]any); ok && output["output"] == "video" && output["format"] == "mp4" {
+			if wantMap, ok := want.(map[string]any); ok {
+				if wantOutput, ok := wantMap["output"].(map[string]any); ok {
+					if _, exists := wantOutput["output"]; !exists {
+						delete(output, "output")
+					}
+					if _, exists := wantOutput["format"]; !exists {
+						delete(output, "format")
+					}
+				}
+			}
+		}
 	}
 	wantJSON, _ := json.Marshal(want)
 	gotJSON, _ := json.Marshal(actual)

@@ -162,6 +162,8 @@ BeefTV also includes project and personal asset libraries, asynchronous tasks, m
 
 See [Quick Start](QUICKSTART.md) for model setup and building from source, and the [desktop release guide](docs/desktop-release.md) for packaging requirements.
 
+This fork also includes native ComfyUI and external Agent integration. See the [fork handoff](docs/fork-handoff.md) for maintenance boundaries.
+
 ## Contributing and license
 
 Issues and pull requests are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development workflow and testing requirements.

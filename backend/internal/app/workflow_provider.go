@@ -19,7 +19,7 @@ func isRunningHubInterface(value string) bool {
 }
 
 func isWorkflowProviderInterface(value string) bool {
-	return isRunningHubInterface(value)
+	return isRunningHubInterface(value) || workflow.IsNativeComfyInterface(value)
 }
 
 func validateWorkflowProviderConfig(mode string, config providerConfig) error {
@@ -28,6 +28,9 @@ func validateWorkflowProviderConfig(mode string, config providerConfig) error {
 
 func (s *Service) runWorkflowProviderTask(ctx context.Context, input canvasGenerationInput) (map[string]interface{}, error) {
 	if isRunningHubInterface(input.Config.InterfaceType) {
+		return s.runRunningHubWorkflow(ctx, input)
+	}
+	if workflow.IsNativeComfyInterface(input.Config.InterfaceType) {
 		return s.runRunningHubWorkflow(ctx, input)
 	}
 	return nil, errors.New("未知工作流协议")
@@ -104,6 +107,12 @@ func (s *Service) fenceWorkflowSubmission(ctx context.Context, input workflow.In
 func (s *Service) fetchRunningHubWorkflowJSON(ctx context.Context, root string, config providerConfig, workflowID string) (map[string]interface{}, error) {
 	return s.workflowClient(nil).FetchWorkflowJSON(ctx, root, workflowConfigFromProvider(config), workflowID)
 }
+
+func (s *Service) InspectNativeComfyUI(ctx context.Context, config providerConfig) (map[string]interface{}, error) {
+	return s.workflowClient(nil).InspectNativeComfy(ctx, workflowConfigFromProvider(config))
+}
+
+type NativeComfyInspectConfig = providerConfig
 
 func (s *Service) uploadRunningHubMedia(ctx context.Context, root string, config providerConfig, media providerMedia) (string, error) {
 	return s.workflowClient(nil).UploadMedia(ctx, root, workflowConfigFromProvider(config), workflowMedia(media), s.IsLocalMode())

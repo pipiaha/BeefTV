@@ -41,6 +41,9 @@ const BUILTIN_PROTOCOL_CAPABILITIES: Record<ModelProtocol, ProtocolCapability> =
     "full-video": "video",
     "openai-audio": "audio",
     "async-audio": "audio",
+    "comfyui-image": "image",
+    "comfyui-video": "video",
+    "comfyui-audio": "audio",
 };
 export function modelProtocolCapability(value: string | undefined, definitions: ModelProtocolDefinition[] = []) {
     const definition = modelProtocolDefinition(value, definitions);

@@ -9,6 +9,7 @@ import { beefAPIImageContract } from "@/lib/beefapi-image-contracts";
 import { defaultProtocolForCapability, defaultProtocolForModel, inferProtocolCapabilityFromModel, modelProtocolCapability, normalizeModelProtocol, usesOpenAICompatibleProtocolDefault, type ModelProtocol } from "@/lib/model-protocols";
 import { normalizeVideoBoolean, normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
 import { defaultModelCapabilityConfig, upgradeGPTImageCapability, workflowFieldRole, workflowFieldSafeToOverride, workflowVideoFieldsFromJson, type ModelCapabilityConfig } from "@/lib/model-capabilities";
+import { nativeComfyCapabilityForProtocol, parseNativeComfyApiGraph, type NativeComfyWorkflow } from "@/lib/native-comfyui";
 import { useUserStore } from "@/stores/use-user-store";
 import type { CapabilitySpec } from "@/services/api/logical-models";
 import { seedancePortraitLabel, seedancePortraitModel, type VideoPriceQuote } from "@/lib/seedance-portrait";
@@ -344,6 +345,8 @@ export type WorkflowGraphPreview = {
     edges: Array<{ from: string; to: string }>;
 };
 
+export type { NativeComfyWorkflow };
+
 // 兼容仍在使用旧目录标识的会话恢复和模型选择器。
 export const PUBLIC_MODEL_CATALOG_ID = "managed";
 
@@ -376,9 +379,11 @@ export type ModelChannel = {
         description?: string;
         icon?: string;
         capability: ModelCapability;
+        audioUses?: AudioModelUse[];
         protocol?: ModelProtocol;
         referenceMediaTransport?: ReferenceMediaTransport;
         authType?: string;
+        comfyui?: NativeComfyWorkflow;
         capabilityConfig?: ModelCapabilityConfig;
         imageCapabilitiesVersion?: string;
         videoCapabilitiesVersion?: string;
@@ -439,6 +444,7 @@ export type AiConfig = {
 
 export const CONFIG_STORE_KEY = "open_ai_canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
+export type AudioModelUse = "music" | "speech" | "sound";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
@@ -659,6 +665,7 @@ export function channelHasManagedBeefAPICredential(channel: Pick<ModelChannel, "
 
 export function channelHasGenerationCredential(channel: Pick<ModelChannel, "id" | "pinned" | "credentialRef" | "hasApiKey" | "apiKey" | "modelProfiles">, model = "") {
     if (model && channel.modelProfiles?.some((item) => item.model === modelOptionName(model) && item.authType === "none")) return true;
+    if (!model && channel.modelProfiles?.length && channel.modelProfiles.every((item) => item.authType === "none")) return true;
     return channelHasManagedBeefAPICredential(channel) || Boolean(channel.apiKey?.trim());
 }
 
@@ -1000,7 +1007,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         credentialRef: channel?.credentialRef,
         hasApiKey: channel?.hasApiKey,
         hasSecretKey: channel?.hasSecretKey,
-        modelProfiles: channel?.modelProfiles?.map((item) => ({ ...item, protocol: normalizeModelProtocol(item.protocol) })),
+        modelProfiles: channel?.modelProfiles?.map((item) => normalizeModelProfile(item)),
     };
 }
 
@@ -1121,7 +1128,30 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
         interfaceType,
         channelId: channel.scope === "system" ? channel.id : "",
         credentialRef: channel.credentialRef || (isBuiltinBeefAPIChannel(channel) ? MANAGED_BEEFAPI_CREDENTIAL_REF : undefined),
+        authType: modelProfile?.authType,
+        comfyui: modelProfile?.comfyui,
     };
+}
+
+function normalizeModelProfile(profile: NonNullable<ModelChannel["modelProfiles"]>[number]) {
+    const protocol = normalizeModelProtocol(profile.protocol);
+    const capability = nativeComfyCapabilityForProtocol(protocol);
+    return {
+        ...profile,
+        protocol,
+        ...(capability && profile.comfyui ? { comfyui: normalizeSavedNativeComfyWorkflow(profile.comfyui, capability) } : {}),
+    };
+}
+
+function normalizeSavedNativeComfyWorkflow(value: NativeComfyWorkflow, capability: "image" | "video" | "audio"): NativeComfyWorkflow {
+    const fields = normalizeWorkflowFieldMappings(value.fields, capability);
+    if (!value.graph || typeof value.graph !== "object" || Array.isArray(value.graph)) return { ...value, fields };
+    try {
+        return { ...value, ...parseNativeComfyApiGraph(value.graph), fields, outputNodeId: String(value.outputNodeId || "").trim(), outputField: String(value.outputField || "").trim() };
+    } catch {
+        // 无效快照必须保留给设置页修复，不能在启动归一化时静默删除。
+        return { ...value, fields, outputNodeId: String(value.outputNodeId || "").trim(), outputField: String(value.outputField || "").trim() };
+    }
 }
 
 function normalizeChannels(config: AiConfig, ensureDefault = true) {
@@ -1167,6 +1197,7 @@ export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
 }
 
 export function defaultBaseUrlForChannelInterface(interfaceType?: ChannelInterfaceType) {
+    if (interfaceType === "comfyui-image" || interfaceType === "comfyui-video" || interfaceType === "comfyui-audio") return "";
     if (interfaceType === "gemini-veo" || interfaceType === "gemini-image") return GEMINI_BASE_URL;
     if (interfaceType === "novita-video") return "https://api.novita.ai/v3";
     if (interfaceType === "volcengine-ark-agent-plan-image" || interfaceType === "volcengine-ark-agent-plan-video") return "https://ark.cn-beijing.volces.com/api/plan/v3";
@@ -1251,6 +1282,18 @@ export function isSystemProxyBaseUrl(baseUrl: string) {
 
 export function systemProxyChannelId(baseUrl: string) {
     const value = baseUrl.trim();
+    if (!value) return "";
+    // 只有指向本应用自身的地址才可能是系统代理；外部 API 地址
+    // （如 https://open.bigmodel.cn/api/anthropic）不应被误判后遭过滤。
+    if (/^[a-z][a-z0-9+.\-]*:\/\//i.test(value)) {
+        try {
+            const url = new URL(value);
+            if (typeof window !== "undefined" && window.location?.origin &&
+                url.origin !== window.location.origin) return "";
+        } catch {
+            return "";
+        }
+    }
     const lowerValue = value.toLowerCase();
     for (const marker of ["/api/ai/system/", "/api/"]) {
         const index = lowerValue.lastIndexOf(marker);

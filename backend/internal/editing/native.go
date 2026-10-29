@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	FFmpegPathEnv    = mediatools.FFmpegPathEnv
-	SubtitleFileName = "render-subtitles.srt"
+	FFmpegPathEnv       = mediatools.FFmpegPathEnv
+	SubtitleFileName    = "render-subtitles.srt"
+	contactSheetPadding = 8
 )
 
 // ResolveFFmpegBinary returns the native ffmpeg executable.
@@ -24,6 +25,106 @@ func ResolveFFmpegBinary() (string, error) {
 // (or absolute paths). Missing source files return nil so execution cannot succeed
 // after dropping content. This function does not re-select or reorder plan clips.
 func BuildFFmpegArgs(plan Plan, files map[string]string, target string) []string {
+	switch plan.Output.Output {
+	case OutputAudio:
+		return buildAudioFFmpegArgs(plan, files, target)
+	case OutputImage:
+		return buildImageFFmpegArgs(plan, files, target)
+	default:
+		return buildVideoFFmpegArgs(plan, files, target)
+	}
+}
+
+func buildAudioFFmpegArgs(plan Plan, files map[string]string, target string) []string {
+	if len(plan.Audio) == 0 || plan.DurationMs <= 0 {
+		return nil
+	}
+	rate := plan.Output.SampleRate
+	if rate <= 0 {
+		rate = DefaultSampleRate
+	}
+	args := []string{"-nostdin", "-y"}
+	filters := make([]string, 0, len(plan.Audio)+1)
+	labels := ""
+	for i, clip := range plan.Audio {
+		path := files[clip.SourceID]
+		if path == "" {
+			return nil
+		}
+		args = append(args,
+			"-ss", fmt.Sprintf("%.3f", float64(clip.SourceStartMs)/1000),
+			"-t", fmt.Sprintf("%.3f", float64(clip.DurationMs)/1000),
+			"-i", path,
+		)
+		volume := clip.Volume
+		if clip.Muted {
+			volume = 0
+		}
+		filter := fmt.Sprintf("[%d:a]aformat=sample_fmts=fltp:sample_rates=%d:channel_layouts=stereo,asetpts=PTS-STARTPTS,volume=%.3f,apad,atrim=duration=%.3f%s", i, rate, volume, float64(clip.DurationMs)/1000, audioFades(clip.FadeInMs, clip.FadeOutMs, clip.DurationMs))
+		if clip.StartMs > 0 {
+			filter += fmt.Sprintf(",adelay=%d:all=1", clip.StartMs)
+		}
+		filter += fmt.Sprintf("[a%d]", i)
+		filters = append(filters, filter)
+		labels += fmt.Sprintf("[a%d]", i)
+	}
+	filters = append(filters, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0,atrim=duration=%.3f[aout]", labels, len(plan.Audio), float64(plan.DurationMs)/1000))
+	args = append(args, "-filter_complex", strings.Join(filters, ";"), "-map", "[aout]", "-ar", fmt.Sprintf("%d", rate))
+	if plan.Output.Format == FormatMP3 {
+		args = append(args, "-c:a", "libmp3lame", "-b:a", "128k")
+	} else {
+		args = append(args, "-c:a", "pcm_s16le")
+	}
+	return append(args, "-t", fmt.Sprintf("%.3f", float64(plan.DurationMs)/1000), target)
+}
+
+func buildImageFFmpegArgs(plan Plan, files map[string]string, target string) []string {
+	var images []Segment
+	for _, segment := range plan.Segments {
+		if segment.Kind == KindImage {
+			images = append(images, segment)
+		}
+	}
+	if len(images) != 2 {
+		return nil
+	}
+	width := plan.Output.Width
+	height := plan.Output.Height
+	if width <= 0 {
+		width = DefaultWidth
+	}
+	if height <= 0 {
+		height = DefaultHeight
+	}
+	panelWidth := (width - 3*contactSheetPadding) / 2
+	panelHeight := height - 2*contactSheetPadding
+	if panelWidth <= 0 || panelHeight <= 0 {
+		return nil
+	}
+	args := []string{"-nostdin", "-y"}
+	filters := make([]string, 0, len(images)+1)
+	labels := ""
+	for i, segment := range images {
+		path := files[segment.SourceID]
+		if path == "" {
+			return nil
+		}
+		args = append(args, "-i", path)
+		filter := fmt.Sprintf("[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[p%d]", i, panelWidth, panelHeight, panelWidth, panelHeight, i)
+		filters = append(filters, filter)
+		labels += fmt.Sprintf("[p%d]", i)
+	}
+	filters = append(filters, fmt.Sprintf("%shstack=inputs=2,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=white,format=rgb24[vout]", labels, width, height))
+	args = append(args, "-filter_complex", strings.Join(filters, ";"), "-map", "[vout]", "-frames:v", "1")
+	if plan.Output.Format == FormatJPEG {
+		args = append(args, "-c:v", "mjpeg", "-q:v", "2")
+	} else {
+		args = append(args, "-c:v", "png")
+	}
+	return append(args, target)
+}
+
+func buildVideoFFmpegArgs(plan Plan, files map[string]string, target string) []string {
 	if len(plan.Segments) == 0 {
 		return nil
 	}

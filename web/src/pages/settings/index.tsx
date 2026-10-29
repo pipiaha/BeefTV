@@ -17,7 +17,7 @@ import { PageHeader } from "@/components/layout/workspace-page";
 type ConfigSectionKey = "channels" | "models" | "storage" | "diagnostics";
 
 export function isConfigSection(value: string | null): value is ConfigSectionKey {
-    return value === "channels" || value === "storage" || value === "diagnostics";
+    return value === "channels" || value === "models" || value === "storage" || value === "diagnostics";
 }
 
 export default function SettingsPage() {
@@ -26,8 +26,8 @@ export default function SettingsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
     const requestedSection = searchParams.get("section");
     const customChannelsEnabled = useUserStore((state) => state.features.customChannelsEnabled);
-    const initialSection = isConfigSection(requestedSection) ? requestedSection : "channels";
-    const [activeTab, setActiveTab] = useState<ConfigSectionKey>(initialSection === "models" ? "channels" : initialSection);
+    const initialSection = isConfigSection(requestedSection) && requestedSection !== "models" ? requestedSection : "channels";
+    const [activeTab, setActiveTab] = useState<ConfigSectionKey>(initialSection);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -40,7 +40,7 @@ export default function SettingsPage() {
     }, []);
 
     useEffect(() => {
-        setActiveTab(isConfigSection(requestedSection) && (requestedSection !== "storage" || nativeStorage) ? requestedSection : "channels");
+        setActiveTab(isConfigSection(requestedSection) && requestedSection !== "models" && (requestedSection !== "storage" || nativeStorage) ? requestedSection : "channels");
     }, [requestedSection, nativeStorage]);
 
     const selectSection = (section: ConfigSectionKey) => {
@@ -71,14 +71,6 @@ export default function SettingsPage() {
         channels: (
             <SettingsPane>
                 <ChannelSettingsPane onOpenDiagnostics={() => selectSection("diagnostics")} />
-                <div className="settings-section model-default-section">
-                    <div className="settings-pane-header">
-                        <div className="min-w-0">
-                            <h2>默认模型</h2>
-                        </div>
-                    </div>
-                    <ModelDefaultGrid config={effectiveConfig} onChange={(key, model) => updateConfig(key, model)} />
-                </div>
             </SettingsPane>
         ),
         storage: (
@@ -88,7 +80,9 @@ export default function SettingsPage() {
                     <StorageSettingsPane />
                     <ReferenceStoragePane />
                     <section className="settings-section storage-settings-block space-y-4" aria-label="深度捕捉组件">
-                        <div className="settings-pane-header"><h2>深度捕捉组件</h2></div>
+                        <div className="settings-pane-header">
+                            <h2>深度捕捉组件</h2>
+                        </div>
                         <DepthComponentsPanel />
                     </section>
                 </div>
@@ -98,12 +92,12 @@ export default function SettingsPage() {
             <SettingsPane>
                 <div className="settings-pane-header">
                     <div className="min-w-0">
-                        <h2>模型选择</h2>
-                        <p>按领域选择默认模型；模型能力与请求协议在渠道“模型与能力”中配置。</p>
+                        <h2>默认模型</h2>
+                        <p>选择创作时默认使用的模型。服务地址、生成类型与工作流在“服务接入”中管理。</p>
                     </div>
                 </div>
                 <div className="settings-section">
-                            <ModelDefaultGrid config={effectiveConfig} onChange={(key, model) => updateConfig(key, model)} onOpenChannels={customChannelsEnabled ? () => selectSection("channels") : undefined} />
+                    <ModelDefaultGrid config={effectiveConfig} onChange={(key, model) => updateConfig(key, model)} onOpenChannels={customChannelsEnabled ? () => selectSection("channels") : undefined} />
                 </div>
             </SettingsPane>
         ),
@@ -111,29 +105,30 @@ export default function SettingsPage() {
 
     return (
         <main className="settings-page app-workspace-page app-user-workspace app-section-page flex h-full min-h-0 flex-col text-foreground">
-                {shouldPromptContinue ? <div className="settings-topbar shrink-0">
+            {shouldPromptContinue ? (
+                <div className="settings-topbar shrink-0">
                     <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-                        {shouldPromptContinue ? <>
-                        <Button icon={<ArrowLeft className="size-4" />} onClick={() => navigate(-1)}>返回创作</Button>
-                        <Button type="primary" onClick={finishConfig}>保存并返回</Button>
-                        </> : null}
+                        {shouldPromptContinue ? (
+                            <>
+                                <Button icon={<ArrowLeft className="size-4" />} onClick={() => navigate(-1)}>
+                                    返回创作
+                                </Button>
+                                <Button type="primary" onClick={finishConfig}>
+                                    保存并返回
+                                </Button>
+                            </>
+                        ) : null}
                     </div>
-                </div> : null}
+                </div>
+            ) : null}
             <div className="settings-library-frame flex min-h-0 flex-1 flex-col md:flex-row">
                 <section className="settings-content flex min-h-0 min-w-0 flex-1 flex-col">
                     <div className="app-workspace-scroll app-section-page-content min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                        <div className="settings-pane-root mx-auto w-full max-w-none">
-                            {panes[activeTab === "diagnostics" ? "channels" : activeTab]}
-                        </div>
+                        <div className="settings-pane-root mx-auto w-full max-w-none">{panes[activeTab === "diagnostics" ? "channels" : activeTab]}</div>
                     </div>
                 </section>
             </div>
-            <DiagnosticsPanel
-                open={activeTab === "diagnostics"}
-                onClose={() => selectSection("channels")}
-                taskId={searchParams.get("taskId") || undefined}
-                projectId={searchParams.get("projectId") || undefined}
-            />
+            <DiagnosticsPanel open={activeTab === "diagnostics"} onClose={() => selectSection("channels")} taskId={searchParams.get("taskId") || undefined} projectId={searchParams.get("projectId") || undefined} />
         </main>
     );
 }

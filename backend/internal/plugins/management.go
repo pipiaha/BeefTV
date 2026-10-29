@@ -386,7 +386,22 @@ func (s *Service) WorkflowStatusesForUser(userID string) (map[string]string, err
 	return statuses, nil
 }
 
+// isNativeComfyInterface 判断是否为原生 ComfyUI 接入。原生接入不经过插件
+// 注册表，任何工作流插件开关都不应该拦截它。
+func isNativeComfyInterface(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(model.ChannelInterfaceNativeComfyImage),
+		string(model.ChannelInterfaceNativeComfyVideo),
+		string(model.ChannelInterfaceNativeComfyAudio):
+		return true
+	}
+	return false
+}
+
 func (s *Service) RequireWorkflowForInterface(interfaceType string) error {
+	if isNativeComfyInterface(interfaceType) {
+		return nil
+	}
 	pluginID, ok := WorkflowIDForInterface(interfaceType)
 	if !ok {
 		return Forbidden("未知工作流插件")
@@ -402,6 +417,9 @@ func (s *Service) RequireWorkflowForInterface(interfaceType string) error {
 }
 
 func (s *Service) RequireWorkflowForUser(userID string, interfaceType string) error {
+	if isNativeComfyInterface(interfaceType) {
+		return nil
+	}
 	pluginID, ok := WorkflowIDForInterface(interfaceType)
 	if !ok {
 		return Forbidden("未知工作流插件")

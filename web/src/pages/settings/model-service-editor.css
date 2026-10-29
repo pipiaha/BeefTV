@@ -71,3 +71,6 @@
  .model-service-catalog-header { align-items:flex-start; }
  .model-service-model { gap:8px; }
 }
+
+.model-service-body-embedded .model-service-connection { grid-template-columns: minmax(0, 1fr); }
+.model-service-body-embedded .model-service-fields { min-width: 0; }

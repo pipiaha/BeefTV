@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -46,6 +47,9 @@ func (s *Service) CreateProjectShot(userID string, projectID string, req CreateP
 	} else {
 		existing, err := s.repo.ShotForProject(projectID, shotID)
 		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.Shot{}, kernel.BadAuthRequest("镜头不存在：" + shotID)
+			}
 			return model.Shot{}, err
 		}
 		if unitID == "" {

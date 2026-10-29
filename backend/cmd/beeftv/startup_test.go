@@ -111,7 +111,7 @@ func TestMCPFixtureHandshakeAndCancellation(t *testing.T) {
 	}
 	defer session.Close()
 	listed, err := session.ListTools(ctx, nil)
-	if err != nil || len(listed.Tools) != 1 || listed.Tools[0].Name != "canvas.get" {
+	if err != nil || len(listed.Tools) != 2 {
 		t.Fatalf("unexpected tools: %+v, %v", listed, err)
 	}
 	callCtx, cancelCall := context.WithCancel(ctx)
