@@ -25,10 +25,17 @@ const (
 	maxNativeComfyUploadBytes = 128 << 20
 	maxNativeComfyBodyBytes   = 256 << 20
 	maxNativeComfyJSONBytes   = 64 << 20
+	nativeComfyMissingPolls   = 15
 	nativeComfyUploadFolder   = "beeftv"
 )
 
 var errNativeComfyNotQueued = errors.New("not queued")
+
+type nativeComfyMissingPrompt string
+
+func (e nativeComfyMissingPrompt) Error() string {
+	return fmt.Sprintf("ComfyUI 队列与历史中均找不到任务 %s，不会自动重新提交", string(e))
+}
 
 func validateNativeComfyConfig(mode string, config Config) error {
 	interfaceType := strings.ToLower(strings.TrimSpace(config.InterfaceType))
@@ -247,8 +254,20 @@ func (c *Client) pollNativeComfy(ctx context.Context, config Config, input Input
 		MaxDownloadTries:      3,
 		RetryTransient:        true,
 	}
+	missingPolls := 0
 	return c.Poller.Poll(ctx, promptID, policy, func(ctx context.Context) (PollOutcome, error) {
 		result, stage, err := c.queryNativeComfy(ctx, config, input, promptID)
+		var missing nativeComfyMissingPrompt
+		if errors.As(err, &missing) {
+			missingPolls++
+			// Queue removal can precede history publication. Keep polling the same ID
+			// for 30 seconds; a visible queue/history entry resets this grace period.
+			if missingPolls <= nativeComfyMissingPolls {
+				stage, err = "等待 ComfyUI 历史落盘", nil
+			}
+		} else {
+			missingPolls = 0
+		}
 		if err == nil && result == nil {
 			next := c.Time.Now().Add(policy.Interval)
 			if c.Receipt != nil {
@@ -277,7 +296,7 @@ func (c *Client) queryNativeComfy(ctx context.Context, config Config, input Inpu
 			if !errors.Is(queueErr, errNativeComfyNotQueued) {
 				return nil, "", queueErr
 			}
-			return nil, "", fmt.Errorf("ComfyUI 队列与历史中均找不到任务 %s，不会自动重新提交", promptID)
+			return nil, "", nativeComfyMissingPrompt(promptID)
 		}
 		return nil, stage, nil
 	}
