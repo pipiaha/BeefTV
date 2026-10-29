@@ -490,6 +490,81 @@ func TestCanvasTaskBindClosedUIAndRestartUseSameOperation(t *testing.T) {
 	}
 }
 
+func TestCanvasTaskBindRecoveryDoesNotReloadCompletedCanvas(t *testing.T) {
+	h := newHarness(t)
+	task := h.seedReadyCanvasImageTask(t, "task-recovery-idle", "node-recovery-idle", "Already bound", 1, 2)
+	if _, err := h.bindTask(t, task.ID, "node-recovery-idle", 0); err != nil {
+		t.Fatal(err)
+	}
+	db := h.service.Database()
+	canvasReads, receiptPayloadReads := 0, 0
+	if err := db.Callback().Query().Before("gorm:query").Register("recovery_projection_reads", func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil {
+			return
+		}
+		switch tx.Statement.Schema.Name {
+		case "CanvasProject":
+			canvasReads++
+		case "AgentOpRecord":
+			if len(tx.Statement.Selects) == 0 {
+				receiptPayloadReads++
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove("recovery_projection_reads") })
+	for range 3 {
+		if err := h.service.RecoverIncompleteGenerationDeliveries(8); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if canvasReads != 0 || receiptPayloadReads != 0 {
+		t.Fatalf("completed recovery reloaded canvas %d times and full receipts %d times", canvasReads, receiptPayloadReads)
+	}
+	if h.receiptCount(t, localtask.AttachNodeEffectKey(task.ID, "node-recovery-idle", 0)) != 1 || h.count(t, &model.Asset{}) != 1 {
+		t.Fatal("recovery changed the committed receipt or asset")
+	}
+}
+
+func TestEnsureAppliedKeepsBindPayloadAndAuthorizationChecks(t *testing.T) {
+	h := newHarness(t)
+	task := h.seedReadyCanvasImageTask(t, "task-ensure", "node-ensure", "Ensure effect", 1, 2)
+	req := operations.Request{
+		Op: "canvas.task.bind", OpID: localtask.AttachNodeEffectKey(task.ID, "node-ensure", 0),
+		UserID: h.userID, Caller: operations.ManualCaller(false),
+		Params: bindParams(h.canvasID, task.ID, "node-ensure", 0),
+	}
+	if err := h.registry.EnsureApplied(req); err != nil {
+		t.Fatal(err)
+	}
+	req.Params = frontendBindParams(h.canvasID, task.ID, "node-ensure", 0)
+	if err := h.registry.EnsureApplied(req); err != nil {
+		t.Fatalf("canonical replay: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*operations.Request)
+		reason string
+	}{
+		{"different canvas", func(r *operations.Request) { r.Params = bindParams("other-canvas", task.ID, "node-ensure", 0) }, "operation_id_reused_with_different_payload"},
+		{"read only", func(r *operations.Request) { r.Caller = operations.ManualCaller(true) }, "read_only_client"},
+		{"missing scope", func(r *operations.Request) { r.UserID = "" }, "missing_scope"},
+		{"unscoped assistant", func(r *operations.Request) { r.Caller = operations.AssistantCaller(nil, false) }, "missing_assistant_scope"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			invalid := req
+			test.mutate(&invalid)
+			if got := opErr(t, h.registry.EnsureApplied(invalid)); got.Reason != test.reason {
+				t.Fatalf("reason = %q, want %q", got.Reason, test.reason)
+			}
+		})
+	}
+	if h.receiptCount(t, req.OpID) != 1 || h.count(t, &model.Asset{}) != 1 {
+		t.Fatal("ensure duplicated the receipt or asset")
+	}
+}
+
 func TestCanvasTaskBindRecoversWhenNodeAppearsAfterDeliver(t *testing.T) {
 	h := newHarness(t)
 	task := h.seedReadyCanvasImageTask(t, "task-later-node", "node-later", "后出现的节点", 5, 6)

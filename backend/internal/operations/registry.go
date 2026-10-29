@@ -182,6 +182,16 @@ func (op *Op) writeAwareParams() json.RawMessage {
 // Execute 执行一个操作：校验能力边界与调用方范围、做持久化幂等，并把业务写入放进事务。
 // 授权发生在回放之前：只读客户端、越界助手、缺少身份都不能靠重放拿到别人的结果。
 func (r *Registry) Execute(req Request) (Result, error) {
+	return r.execute(req, false)
+}
+
+// EnsureApplied checks completed effects without reconstructing client results.
+func (r *Registry) EnsureApplied(req Request) error {
+	_, err := r.execute(req, true)
+	return err
+}
+
+func (r *Registry) execute(req Request, omitReplayResult bool) (Result, error) {
 	op, ok := r.ops[strings.TrimSpace(req.Op)]
 	if !ok {
 		return Result{}, NotFound("unknown_operation", "未知操作: "+req.Op)
@@ -280,7 +290,8 @@ func (r *Registry) Execute(req Request) (Result, error) {
 		}
 	}
 	outcome, err := r.store.RunDomain(runCtx, RunRequest{UserID: req.UserID, OpID: opID, Op: op.ID,
-		PayloadHash: canonicalHash, AlternatePayloadHash: alternateHash, TurnID: req.TurnID, CanvasID: target.CanvasID}, r.binder, func(domain Domain) ([]byte, error) {
+		PayloadHash: canonicalHash, AlternatePayloadHash: alternateHash, TurnID: req.TurnID, CanvasID: target.CanvasID,
+		OmitReplayResult: omitReplayResult}, r.binder, func(domain Domain) ([]byte, error) {
 		execCtx := &Context{Context: runCtx, UserID: req.UserID, Caller: caller, Domain: domain, OperationID: opID, TurnID: req.TurnID}
 		value, runErr := op.Handler(execCtx, params)
 		if runErr != nil {
@@ -294,6 +305,9 @@ func (r *Registry) Execute(req Request) (Result, error) {
 	})
 	if err != nil {
 		return Result{}, err
+	}
+	if omitReplayResult {
+		return Result{Op: op.ID, OpID: opID, Replayed: outcome.Replayed, Caller: caller.Kind}, nil
 	}
 	var decoded any
 	if len(outcome.Result) > 0 {

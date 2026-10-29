@@ -132,7 +132,7 @@ func (s *Service) executeMessageTaskAttach(registry *operations.Registry, task m
 	if err != nil {
 		return err
 	}
-	_, err = registry.Execute(operations.Request{
+	err = registry.EnsureApplied(operations.Request{
 		Op:     "conversation.message.attach",
 		OpID:   localtask.AttachMessageEffectKey(task.ID, messageID, outputIndex),
 		UserID: task.UserID,
@@ -160,7 +160,7 @@ func (s *Service) executeCanvasTaskBind(registry *operations.Registry, task mode
 	if err != nil {
 		return err
 	}
-	_, err = registry.Execute(operations.Request{
+	err = registry.EnsureApplied(operations.Request{
 		Op:     "canvas.task.bind",
 		OpID:   localtask.AttachNodeEffectKey(task.ID, nodeID, outputIndex),
 		UserID: task.UserID,

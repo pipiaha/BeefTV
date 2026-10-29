@@ -35,6 +35,7 @@ type RunRequest struct {
 	TurnID               string
 	CanvasID             string
 	TurnGuard            TurnGuard
+	OmitReplayResult     bool
 }
 
 // TurnGuard closes the preflight/settlement race on the same connection as
@@ -105,6 +106,18 @@ func (s *Store) Run(ctx context.Context, req RunRequest, fn func(tx *gorm.DB) ([
 		out, err := fn(db)
 		return RunOutcome{Result: out}, err
 	}
+	if req.OmitReplayResult {
+		// Successful receipts are committed with the effect and are immutable.
+		// Recovery must not load their potentially multi-megabyte result JSON.
+		var existing model.AgentOpRecord
+		err := db.Select("op", "status", "payload_hash").Where("user_id = ? AND op_id = ?", req.UserID, req.OpID).Take(&existing).Error
+		if err == nil {
+			return replayOutcome(existing, req)
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return RunOutcome{}, AsError(err)
+		}
+	}
 	var outcome RunOutcome
 	err := db.Transaction(func(tx *gorm.DB) error {
 		record := model.AgentOpRecord{OpID: req.OpID, UserID: req.UserID, Op: req.Op,
@@ -114,20 +127,16 @@ func (s *Store) Run(ctx context.Context, req RunRequest, fn func(tx *gorm.DB) ([
 				return AsError(err)
 			}
 			var existing model.AgentOpRecord
-			if findErr := tx.Where("user_id = ? AND op_id = ?", req.UserID, req.OpID).First(&existing).Error; findErr != nil {
-				return AsError(err)
+			query := tx.Where("user_id = ? AND op_id = ?", req.UserID, req.OpID)
+			if req.OmitReplayResult {
+				query = query.Select("op", "status", "payload_hash")
 			}
-			if existing.Status != "succeeded" {
-				return Conflict("operation_in_progress",
-					"同一操作正在执行或上次未成功，未回放结果", map[string]any{"opId": req.OpID, "status": existing.Status})
+			if findErr := query.First(&existing).Error; findErr != nil {
+				return AsError(findErr)
 			}
-			if !payloadHashAccepted(existing.PayloadHash, req) || existing.Op != req.Op {
-				return Conflict("operation_id_reused_with_different_payload",
-					"同一操作 ID 已用于不同的请求内容；请换用新的操作 ID",
-					map[string]any{"opId": req.OpID, "existingOp": existing.Op})
-			}
-			outcome = RunOutcome{Result: []byte(existing.ResultJSON), Replayed: true}
-			return nil
+			var replayErr error
+			outcome, replayErr = replayOutcome(existing, req)
+			return replayErr
 		}
 		if strings.TrimSpace(req.TurnID) != "" {
 			if req.TurnGuard == nil {
@@ -156,6 +165,22 @@ func (s *Store) Run(ctx context.Context, req RunRequest, fn func(tx *gorm.DB) ([
 		return RunOutcome{}, AsError(err)
 	}
 	return outcome, nil
+}
+
+func replayOutcome(existing model.AgentOpRecord, req RunRequest) (RunOutcome, error) {
+	if existing.Status != "succeeded" {
+		return RunOutcome{}, Conflict("operation_in_progress",
+			"同一操作正在执行或上次未成功，未回放结果", map[string]any{"opId": req.OpID, "status": existing.Status})
+	}
+	if !payloadHashAccepted(existing.PayloadHash, req) || existing.Op != req.Op {
+		return RunOutcome{}, Conflict("operation_id_reused_with_different_payload",
+			"同一操作 ID 已用于不同的请求内容；请换用新的操作 ID",
+			map[string]any{"opId": req.OpID, "existingOp": existing.Op})
+	}
+	if req.OmitReplayResult {
+		return RunOutcome{Replayed: true}, nil
+	}
+	return RunOutcome{Result: []byte(existing.ResultJSON), Replayed: true}, nil
 }
 
 // RunDomain 把当前事务绑成 Domain 再执行：业务端口拿不到 *gorm.DB。
